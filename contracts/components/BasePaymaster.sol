@@ -1,26 +1,27 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 
 import {IEntryPoint} from "../interfaces/IEntryPoint.sol";
 
-abstract contract BasePaymaster is Ownable {
+abstract contract BasePaymaster is AccessControlEnumerable {
     IEntryPoint public immutable entryPoint;
 
-    constructor(address owner, address entryPoint_) Ownable(owner) {
+    constructor(address owner, address entryPoint_) {
         entryPoint = IEntryPoint(entryPoint_);
+        _grantRole(DEFAULT_ADMIN_ROLE, owner);
     }
 
     function deposit() external payable {
         entryPoint.depositTo{value: msg.value}(address(this));
     }
 
-    function withdrawTo(address payable withdrawAddress, uint256 amount) external onlyOwner {
+    function withdrawTo(address payable withdrawAddress, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.withdrawTo(withdrawAddress, amount);
     }
 
-    function addStake(uint32 unstakeDelaySec) external payable onlyOwner {
+    function addStake(uint32 unstakeDelaySec) external payable onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.addStake{value: msg.value}(unstakeDelaySec);
     }
 
@@ -28,11 +29,11 @@ abstract contract BasePaymaster is Ownable {
         return entryPoint.balanceOf(address(this));
     }
 
-    function unlockStake() external onlyOwner {
+    function unlockStake() external onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.unlockStake();
     }
 
-    function withdrawStake(address payable withdrawAddress) external onlyOwner {
+    function withdrawStake(address payable withdrawAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.withdrawStake(withdrawAddress);
     }
 }

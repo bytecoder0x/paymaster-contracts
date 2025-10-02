@@ -1,34 +1,20 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-interface ITokenPaymaster {
-    enum PostOpMode {
-        opSucceeded, // UserOperation succeeded
-        opReverted // UserOperation reverted, Paymaster still has to pay for gas.
-    }
+import {IPaymaster} from "./IPaymaster.sol";
 
-    struct PackedUserOperation {
-        address sender;
-        uint256 nonce;
-        bytes initCode;
-        bytes callData;
-        bytes32 accountGasLimits;
-        uint256 preVerificationGas;
-        bytes32 gasFees;
-        bytes paymasterAndData;
-        bytes signature;
-    }
-
-    function validatePaymasterUserOp(
-        PackedUserOperation calldata userOp,
-        bytes32 userOpHash,
-        uint256 maxCost
-    ) external returns (bytes memory context, uint256 validationData);
-
-    function postOp(
-        PostOpMode mode,
-        bytes calldata context,
-        uint256 actualGasCost,
-        uint256 actualUserOpFeePerGas
-    ) external;
+struct PaymasterPaymentData {
+    address token;
+    uint256 tokenPriceWei;
+    address user;
+    bytes32 userOpHash;
+    uint256 tokenAmount;
+    address operator;
+    uint256 nonce;
+    uint256 deadline;
+    uint8 v;
+    bytes32 r;
+    bytes32 s;
 }
+
+interface ITokenPaymaster is IPaymaster {}
