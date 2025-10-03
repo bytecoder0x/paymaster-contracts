@@ -15,4 +15,12 @@ struct PaymasterPaymentData {
     bytes32 s;
 }
 
-interface ITokenPaymaster is IPaymaster {}
+interface ITokenPaymaster is IPaymaster {
+    event UserOperationSponsored(
+        address indexed sender,
+        bytes32 indexed userOpHash,
+        address indexed token,
+        uint256 tokenAmount,
+        uint256 tokenPrice
+    );
+}

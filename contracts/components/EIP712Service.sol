@@ -33,7 +33,7 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         return super._hashTypedDataV4(structHash);
     }
 
-    function _validatePaymentSignature(PaymasterPaymentData memory param) internal {
+    function _validatePaymentSignature(address from, PaymasterPaymentData memory param) internal {
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
@@ -44,7 +44,7 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         );
         (bool success, string memory errorReason) = _verifySignature(
             encodedData,
-            _msgSender(),
+            from,
             param.operator,
             param.nonce,
             param.deadline,

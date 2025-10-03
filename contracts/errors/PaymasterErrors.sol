@@ -7,3 +7,5 @@ error InvalidPaymasterAndDataLength(uint256 length);
 error ZeroAddress();
 error ZeroUint256();
 error InvalidSender(address paymentUser, address userOpSender);
+error InvalidPostOpContext(uint256 postOpContextLength);
+error ZeroBytes32();

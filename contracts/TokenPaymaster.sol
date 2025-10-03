@@ -9,7 +9,8 @@ import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {UserOperationLib} from "./components/UserOperationLib.sol";
 import {SIG_VALIDATION_SUCCESS} from "./components/Helpers.sol";
-import {OnlyEIP7702, InvalidPaymasterAndDataLength, ZeroAddress, ZeroUint256, InvalidSender} from "./errors/PaymasterErrors.sol";
+
+import {OnlyEIP7702, InvalidPaymasterAndDataLength, ZeroAddress, ZeroUint256, InvalidSender, InvalidPostOpContext, ZeroBytes32} from "./errors/PaymasterErrors.sol";
 
 contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
     using SafeERC20 for IERC20;
@@ -39,16 +40,70 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
 
         IERC20(paymentData.token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
 
-        context = abi.encodePacked(paymentData.token, paymentData.tokenPriceWei, userOp.sender, userOpHash);
+        context = abi.encodePacked(
+            paymentData.token,
+            tokenAmount,
+            paymentData.tokenPriceWei,
+            userOp.sender,
+            userOpHash
+        );
         validationData = SIG_VALIDATION_SUCCESS;
     }
 
     function postOp(
-        PostOpMode mode,
+        PostOpMode,
         bytes calldata context,
         uint256 actualGasCost,
         uint256 actualUserOpFeePerGas
-    ) external onlyEntryPoint {}
+    ) external onlyEntryPoint {
+        (
+            address token,
+            uint256 tokenAmount,
+            uint256 tokenPriceWei,
+            address sender,
+            bytes32 userOpHash
+        ) = _validateAndDecodePostOpContext(context);
+
+        uint256 actualTokenNeeded = ((actualGasCost + postOpCost * actualUserOpFeePerGas) * tokenPriceWei) /
+            _tokenPriceDenominator();
+
+        IERC20(token).safeTransferFrom(address(this), sender, tokenAmount - actualTokenNeeded);
+
+        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
+    }
+
+    function _validateAndDecodeUserOpData(
+        PackedUserOperation calldata userOp
+    ) private returns (PaymasterPaymentData memory paymentData) {
+        if (userOp.sender.code.length == 0) revert OnlyEIP7702();
+
+        paymentData = _parsePaymasterAndData(userOp.paymasterAndData);
+        if (paymentData.token == address(0) || paymentData.user == address(0)) revert ZeroAddress();
+        if (paymentData.tokenPriceWei == 0) revert ZeroUint256();
+        if (paymentData.user != userOp.sender) revert InvalidSender(paymentData.user, userOp.sender);
+
+        _validatePaymentSignature(userOp.sender, paymentData);
+    }
+
+    function _validateAndDecodePostOpContext(
+        bytes calldata context
+    )
+        private
+        pure
+        returns (address token, uint256 tokenAmount, uint256 tokenPriceWei, address sender, bytes32 userOpHash)
+    {
+        if (context.length == 0 || context.length > 136) revert InvalidPostOpContext(context.length);
+
+        token = address(bytes20(context[0:20]));
+        tokenAmount = uint256(bytes32(context[20:52]));
+        tokenPriceWei = uint256(bytes32(context[52:84]));
+        sender = address(bytes20(context[84:104]));
+        userOpHash = bytes32(context[104:136]);
+
+        if (token == address(0) || sender == address(0)) revert ZeroAddress();
+        if (tokenAmount == 0 || tokenPriceWei == 0) revert ZeroUint256();
+        if (userOpHash == bytes32(0)) revert ZeroBytes32();
+    }
 
     function _parsePaymasterAndData(
         bytes calldata paymasterAndData
@@ -59,17 +114,6 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
             revert InvalidPaymasterAndDataLength(paymasterAndData.length);
         }
         return abi.decode(paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:], (PaymasterPaymentData));
-    }
-
-    function _validateAndDecodeUserOpData(
-        PackedUserOperation calldata userOp
-    ) private returns (PaymasterPaymentData memory paymentData) {
-        if (userOp.sender.code.length == 0) revert OnlyEIP7702();
-        paymentData = _parsePaymasterAndData(userOp.paymasterAndData);
-        if (paymentData.token == address(0) || paymentData.user == address(0)) revert ZeroAddress();
-        if (paymentData.tokenPriceWei == 0) revert ZeroUint256();
-        if (paymentData.user != userOp.sender) revert InvalidSender(paymentData.user, userOp.sender);
-        _validatePaymentSignature(paymentData);
     }
 
     function _tokenPriceDenominator() private pure returns (uint256) {
