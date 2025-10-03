@@ -2,13 +2,13 @@
 pragma solidity 0.8.28;
 
 import {IERC20, SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/IPaymaster.sol";
+import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
+import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
 
 import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaster.sol";
-import {PostOpMode, PackedUserOperation} from "./interfaces/IPaymaster.sol";
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
-import {UserOperationLib} from "./components/UserOperationLib.sol";
-import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "./components/Constants.sol";
 
 import "./errors/PaymasterErrors.sol";
 
