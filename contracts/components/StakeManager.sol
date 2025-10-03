@@ -4,13 +4,18 @@ pragma solidity 0.8.28;
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 
 import {IEntryPoint} from "../interfaces/IEntryPoint.sol";
+import {OnlyEntryPoint} from "../errors/PaymasterErrors.sol";
 
-abstract contract BasePaymaster is AccessControlEnumerable {
+abstract contract StakeManager is AccessControlEnumerable {
     IEntryPoint public immutable entryPoint;
 
-    constructor(address owner, address entryPoint_) {
+    modifier onlyEntryPoint() {
+        if (msg.sender != address(entryPoint)) revert OnlyEntryPoint();
+        _;
+    }
+
+    constructor(address entryPoint_) {
         entryPoint = IEntryPoint(entryPoint_);
-        _grantRole(DEFAULT_ADMIN_ROLE, owner);
     }
 
     function deposit() external payable {

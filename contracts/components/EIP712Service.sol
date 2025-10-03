@@ -11,9 +11,9 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
     /// @dev Mapping to track signature nonces, operator's address => caller's address => signature nonce
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
-    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,bytes32 userOpHash,uint256 tokenAmount,uint256 nonce,uint256 deadline)")
+    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,uint256 nonce,uint256 deadline)")
     bytes32 public constant PAYMASTER_PAYMENT_TYPEHASH =
-        0x895ab807e93dfa72b0b2a0ac47b520af6b1d2adcceb91ce175c8bde03fe6d661;
+        0x6c33974f8489bf4058fecaa4b08ea366ab68862d25c8b24bf8f6d55d0d129248;
 
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
@@ -33,14 +33,12 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         return super._hashTypedDataV4(structHash);
     }
 
-    function _validatePaymentSignature(PaymasterPaymentData calldata param) internal {
+    function _validatePaymentSignature(PaymasterPaymentData memory param) internal {
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
             param.tokenPriceWei,
             param.user,
-            param.userOpHash,
-            param.tokenAmount,
             param.nonce,
             param.deadline
         );
@@ -67,7 +65,7 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         bytes32 r,
         bytes32 s
     ) private returns (bool result, string memory errorReason) {
-        if (operator == address(0)) {
+        if (operator == address(0) || deadline < block.timestamp) {
             return (false, "UNAUTHORIZED_OPERATION");
         }
 
