@@ -32,25 +32,21 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         bytes32 userOpHash,
         uint256 maxCost
     ) external onlyEntryPoint returns (bytes memory context, uint256 validationData) {
-        PaymasterPaymentData memory paymentData;
+        if (userOp.sender.code.length == 0 && userOp.initCode.length == 0) revert OnlyEIP7702();
 
-        (paymentData, validationData) = _validateAndDecodeUserOpData(userOp);
+        address token;
+        uint256 tokenPriceWei;
+
+        (token, tokenPriceWei, validationData) = _validateAndDecodePaymasterAndData(userOp);
+        if (validationData == SIG_VALIDATION_FAILED) return (bytes(""), SIG_VALIDATION_FAILED);
 
         uint256 maxFeePerGas = UserOperationLib.unpackMaxFeePerGas(userOp);
-        uint256 tokenAmount = ((maxCost + postOpCost * maxFeePerGas) * paymentData.tokenPriceWei) /
-            _tokenPriceDenominator();
+        uint256 tokenAmount = ((maxCost + postOpCost * maxFeePerGas) * tokenPriceWei) / _tokenPriceDenominator();
 
-        bool prefunded = IERC20(paymentData.token).trySafeTransferFrom(userOp.sender, address(this), tokenAmount);
+        bool prefunded = IERC20(token).trySafeTransferFrom(userOp.sender, address(this), tokenAmount);
+        if (!prefunded) revert PrefundFailed();
 
-        if (validationData == SIG_VALIDATION_FAILED || !prefunded) return (bytes(""), SIG_VALIDATION_FAILED);
-
-        context = abi.encodePacked(
-            paymentData.token,
-            tokenAmount,
-            paymentData.tokenPriceWei,
-            userOp.sender,
-            userOpHash
-        );
+        context = abi.encodePacked(token, tokenAmount, tokenPriceWei, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
     }
 
@@ -73,9 +69,10 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         uint256 actualTokenNeeded = ((actualGasCost + postOpCost * actualUserOpFeePerGas) * tokenPriceWei) /
             _tokenPriceDenominator();
 
-        if (actualTokenNeeded > tokenAmount) revert InsufficientTokenPrepayment(actualTokenNeeded, tokenAmount);
+        if (actualTokenNeeded > tokenAmount) revert InsufficientTokenPrefund(actualTokenNeeded, tokenAmount);
 
-        IERC20(token).safeTransferFrom(address(this), sender, tokenAmount - actualTokenNeeded);
+        bool refunded = IERC20(token).trySafeTransferFrom(address(this), sender, tokenAmount - actualTokenNeeded);
+        if (!refunded) revert RefundFailed();
 
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
     }
@@ -85,35 +82,25 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         token.safeTransfer(recipient, amount);
     }
 
-    function _validateAndDecodeUserOpData(
-        PackedUserOperation calldata userOp
-    ) private returns (PaymasterPaymentData memory paymentData, uint256 validationData) {
-        if (userOp.sender.code.length == 0 && userOp.initCode.length == 0) revert OnlyEIP7702();
-
-        paymentData = _validateAndDecodePaymasterAndData(userOp.paymasterAndData, userOp.sender);
-
-        validationData = _validatePaymentSignature(userOp.sender, paymentData);
-    }
-
     function _validateAndDecodePaymasterAndData(
-        bytes calldata paymasterAndData,
-        address sender
-    ) private pure returns (PaymasterPaymentData memory data) {
-        data = _parsePaymasterAndData(paymasterAndData);
-        if (data.token == address(0) || data.user == address(0)) revert ZeroAddress();
-        if (data.tokenPriceWei == 0) revert ZeroUint256();
-        if (data.user != sender) revert InvalidSender(data.user, sender);
-    }
+        PackedUserOperation calldata userOp
+    ) private returns (address token, uint256 tokenPriceWei, uint256 validationData) {
+        uint256 length = userOp.paymasterAndData.length;
 
-    function _parsePaymasterAndData(
-        bytes calldata paymasterAndData
-    ) private pure returns (PaymasterPaymentData memory) {
         // 52 bytes => paymaster address + gas limit data
         // 320 bytes => PaymasterPaymentData struct (32 x 10)
-        if (paymasterAndData.length < 53 || paymasterAndData.length > 372) {
-            revert InvalidPaymasterAndDataLength(paymasterAndData.length);
+        if (length < 53 || length > 372) {
+            revert InvalidPaymasterAndDataLength(userOp.paymasterAndData.length);
         }
-        return abi.decode(paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:], (PaymasterPaymentData));
+
+        PaymasterPaymentData memory paymentData = abi.decode(
+            userOp.paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:],
+            (PaymasterPaymentData)
+        );
+
+        token = paymentData.token;
+        tokenPriceWei = paymentData.tokenPriceWei;
+        validationData = _validatePaymentSignature(userOp.sender, paymentData);
     }
 
     function _validatePostOpContext(

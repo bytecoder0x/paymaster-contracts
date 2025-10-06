@@ -9,4 +9,6 @@ error ZeroUint256();
 error ZeroBytes32();
 error InvalidSender(address paymentUser, address sender);
 error InvalidPostOpContextLength(uint256 postOpContextLength);
-error InsufficientTokenPrepayment(uint256 actualTokenNeeded, uint256 tokenAmount);
+error InsufficientTokenPrefund(uint256 actualTokenNeeded, uint256 tokenAmount);
+error PrefundFailed();
+error RefundFailed();

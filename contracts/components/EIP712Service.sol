@@ -6,7 +6,7 @@ import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 
 import {PaymasterPaymentData} from "../interfaces/ITokenPaymaster.sol";
-import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "./Constants.sol";
+import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
 
 abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
     /// @dev Mapping to track signature nonces, operator's address => caller's address => signature nonce
@@ -38,6 +38,9 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         address from,
         PaymasterPaymentData memory param
     ) internal returns (uint256 validationData) {
+        if (param.token == address(0) || param.user == address(0) || param.tokenPriceWei == 0 || param.user != from)
+            return SIG_VALIDATION_FAILED;
+
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
