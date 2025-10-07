@@ -2,8 +2,8 @@
 pragma solidity 0.8.28;
 
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
+import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 
-import {IEntryPoint} from "../interfaces/IEntryPoint.sol";
 import {OnlyEntryPoint} from "../errors/PaymasterErrors.sol";
 
 abstract contract StakeManager is AccessControlEnumerable {

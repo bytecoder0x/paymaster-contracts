@@ -9,8 +9,7 @@ import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstractio
 import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaster.sol";
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
-
-import "./errors/PaymasterErrors.sol";
+import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength} from "./errors/PaymasterErrors.sol";
 
 contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
     using SafeERC20 for IERC20;
@@ -32,8 +31,6 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         bytes32 userOpHash,
         uint256 maxCost
     ) external onlyEntryPoint returns (bytes memory context, uint256 validationData) {
-        if (userOp.sender.code.length == 0 && userOp.initCode.length == 0) revert OnlyEIP7702();
-
         address token;
         uint256 tokenPriceWei;
 
@@ -43,8 +40,9 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         uint256 maxFeePerGas = UserOperationLib.unpackMaxFeePerGas(userOp);
         uint256 tokenAmount = ((maxCost + postOpCost * maxFeePerGas) * tokenPriceWei) / _tokenPriceDenominator();
 
-        bool prefunded = IERC20(token).trySafeTransferFrom(userOp.sender, address(this), tokenAmount);
-        if (!prefunded) revert PrefundFailed();
+        if (tokenAmount == 0) revert InsufficientTokenAmount();
+
+        IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
 
         context = abi.encodePacked(token, tokenAmount, tokenPriceWei, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
@@ -56,7 +54,7 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         uint256 actualGasCost,
         uint256 actualUserOpFeePerGas
     ) external onlyEntryPoint {
-        if (context.length == 0 || context.length > 136) revert InvalidPostOpContextLength(context.length);
+        if (context.length != 136) revert InvalidPostOpContextLength(context.length);
 
         address token = address(bytes20(context[0:20]));
         uint256 tokenAmount = uint256(bytes32(context[20:52]));
@@ -64,15 +62,10 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         address sender = address(bytes20(context[84:104]));
         bytes32 userOpHash = bytes32(context[104:136]);
 
-        _validatePostOpContext(token, tokenAmount, tokenPriceWei, sender, userOpHash);
-
         uint256 actualTokenNeeded = ((actualGasCost + postOpCost * actualUserOpFeePerGas) * tokenPriceWei) /
             _tokenPriceDenominator();
 
-        if (actualTokenNeeded > tokenAmount) revert InsufficientTokenPrefund(actualTokenNeeded, tokenAmount);
-
-        bool refunded = IERC20(token).trySafeTransferFrom(address(this), sender, tokenAmount - actualTokenNeeded);
-        if (!refunded) revert RefundFailed();
+        IERC20(token).safeTransfer(sender, tokenAmount - actualTokenNeeded);
 
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
     }
@@ -88,8 +81,8 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
         uint256 length = userOp.paymasterAndData.length;
 
         // 52 bytes => paymaster address + gas limit data
-        // 320 bytes => PaymasterPaymentData struct (32 x 10)
-        if (length < 53 || length > 372) {
+        // 288 bytes => PaymasterPaymentData struct (32 x 9)
+        if (length < 53 || length > 340) {
             revert InvalidPaymasterAndDataLength(userOp.paymasterAndData.length);
         }
 
@@ -98,21 +91,10 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service {
             (PaymasterPaymentData)
         );
 
+        validationData = _validatePaymentSignature(userOp.sender, paymentData);
+
         token = paymentData.token;
         tokenPriceWei = paymentData.tokenPriceWei;
-        validationData = _validatePaymentSignature(userOp.sender, paymentData);
-    }
-
-    function _validatePostOpContext(
-        address token,
-        uint256 tokenAmount,
-        uint256 tokenPriceWei,
-        address sender,
-        bytes32 userOpHash
-    ) private pure {
-        if (token == address(0) || sender == address(0)) revert ZeroAddress();
-        if (tokenAmount == 0 || tokenPriceWei == 0) revert ZeroUint256();
-        if (userOpHash == bytes32(0)) revert ZeroBytes32();
     }
 
     function _tokenPriceDenominator() private pure returns (uint256) {

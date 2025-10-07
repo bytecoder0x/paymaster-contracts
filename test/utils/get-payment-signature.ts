@@ -1,17 +1,15 @@
-import { AddressLike, BytesLike, Signature, Signer } from "ethers";
-import { IERC20, TokenPaymaster } from "../../typechain-types";
+import { Signature } from "ethers";
+import { TokenPaymaster } from "../../typechain-types";
 import { getCurrentTimestamp } from ".";
 import { SIGNATURE_VALIDITY } from "../constants";
 import { network } from "hardhat";
+import { PaymasterPaymentDataStruct } from "../types";
 
 export async function getPaymentSignature(
   paymasterContract: TokenPaymaster,
-  token: IERC20,
-  tokenPriceWei: bigint,
-  user: AddressLike,
-  userOpHash: BytesLike,
-  operator: Signer,
+  paymentStruct: PaymasterPaymentDataStruct,
 ) {
+  const { token, tokenPriceWei, user, operator } = paymentStruct;
   const [nonce, currentTimestamp, verifyingContract] = await Promise.all([
     paymasterContract.operatorUserNonces(operator, user),
     getCurrentTimestamp(),
@@ -31,19 +29,15 @@ export async function getPaymentSignature(
       { name: "token", type: "address" },
       { name: "tokenPriceWei", type: "uint256" },
       { name: "user", type: "address" },
-      { name: "userOpHash", type: "bytes32" },
-      { name: "operator", type: "address" },
       { name: "nonce", type: "uint256" },
       { name: "deadline", type: "uint256" },
     ],
   };
 
   const value = {
-    token,
+    token: token.target.toString(),
     tokenPriceWei,
     user,
-    userOpHash,
-    operator,
     nonce,
     deadline,
   };

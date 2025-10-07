@@ -5,17 +5,13 @@ import "dotenv/config";
 
 const config: HardhatUserConfig = {
   solidity: "0.8.28",
-  gasReporter: {
-    enabled: true,
-    currency: "USD",
-    coinmarketcap: process.env.COINMARKETCAP || undefined,
-  },
+  defaultNetwork: "hardhat",
   networks: {
     hardhat: {
       forking: {
         enabled: true,
         url: `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`,
-        blockNumber: 11988630,
+        blockNumber: 22774486,
       },
       chainId: 1,
       accounts: {

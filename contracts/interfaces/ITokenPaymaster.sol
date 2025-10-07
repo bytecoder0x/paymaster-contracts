@@ -7,7 +7,6 @@ struct PaymasterPaymentData {
     address token;
     uint256 tokenPriceWei;
     address user;
-    bytes32 userOpHash;
     address operator;
     uint256 nonce;
     uint256 deadline;

@@ -4,17 +4,18 @@ pragma solidity 0.8.28;
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
+import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
 
 import {PaymasterPaymentData} from "../interfaces/ITokenPaymaster.sol";
-import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
+import {ZeroAddress, ZeroUint256, InvalidSender} from "../errors/PaymasterErrors.sol";
 
 abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
     /// @dev Mapping to track signature nonces, operator's address => caller's address => signature nonce
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
-    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,bytes32 userOpHash,uint256 nonce,uint256 deadline)")
+    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,uint256 nonce,uint256 deadline)")
     bytes32 public constant PAYMASTER_PAYMENT_TYPEHASH =
-        0x7034e7fd039c6b0784686d708a174c22e8b7d0995f8a4ecbc7da215751c4e0db;
+        0x6c33974f8489bf4058fecaa4b08ea366ab68862d25c8b24bf8f6d55d0d129248;
 
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
@@ -38,15 +39,15 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         address from,
         PaymasterPaymentData memory param
     ) internal returns (uint256 validationData) {
-        if (param.token == address(0) || param.user == address(0) || param.tokenPriceWei == 0 || param.user != from)
-            return SIG_VALIDATION_FAILED;
+        if (param.token == address(0) || param.user == address(0)) revert ZeroAddress();
+        if (param.tokenPriceWei == 0) revert ZeroUint256();
+        if (param.user != from) revert InvalidSender(param.user, from);
 
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
             param.tokenPriceWei,
             param.user,
-            param.userOpHash,
             param.nonce,
             param.deadline
         );
@@ -82,7 +83,7 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         }
 
         bytes32 digest = _hashTypedDataV4(keccak256(encodedData));
-        address recovered = ECDSA.recover(digest, v, r, s);
+        (address recovered, , ) = ECDSA.tryRecover(digest, v, r, s);
 
         // Check the recovered address is valid and authorized
         if (recovered == address(0) || recovered != operator || !hasRole(OPERATOR_ROLE, recovered)) {
