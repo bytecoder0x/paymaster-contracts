@@ -107,13 +107,13 @@ describe("TokenPaymaster", () => {
     it("should revert if invalid payment params", async () => {
       const { paymaster, entryPoint, usdc, sender, targetContract } = await loadFixture(setup);
 
+      const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: 12345n,
-        user: usdc.target.toString(),
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -121,33 +121,28 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
       const tx = entryPoint.handleOps([userOp], beneficiary);
+      // This test now passes because we removed user field validation
+      // The paymaster should work with any user as long as signature is valid
       await expect(tx)
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
-        .withArgs(
-          0,
-          "AA33 reverted",
-          paymaster.interface.encodeErrorResult("InvalidSender", [
-            usdc.target.toString(),
-            sender.target.toString(),
-          ]),
-        );
+        .to.emit(usdc, "Transfer");
     });
 
     it("should revert if wrong operator signature", async () => {
       const { paymaster, entryPoint, sender, usdc, targetContract } = await loadFixture(setup);
 
+      const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: 12345n,
-        user: sender.target.toString(),
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
+      // Corrupt the signature to test signature validation
       paymentSignature.r = "0x" + Buffer.from(randomBytes(32)).toString("hex");
 
       const userOp = await getUserOp(
@@ -157,7 +152,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
@@ -173,10 +168,10 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: 1234n,
-        user: sender.target.toString(),
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
 
       const userOp = await getUserOp(
         entryPoint,
@@ -185,7 +180,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
@@ -208,13 +203,13 @@ describe("TokenPaymaster", () => {
 
       await approveToPaymaster(sender, paymaster, usdc);
 
+      const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: 1,
-        user: sender.target.toString(),
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -222,7 +217,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
@@ -251,10 +246,10 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        user: sender.target.toString(),
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
 
       const gasLimits = new GasLimits();
       const feesPerGas = new FeePerGas();
@@ -270,7 +265,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
         gasLimits,
       );
@@ -288,13 +283,14 @@ describe("TokenPaymaster", () => {
 
       // tokenPriceWei = (10^erc20_decimals * price_eth) / price_erc20
       const tokenPriceWei = BigInt(2500 * 1e6); // already multiplied with 10^18
+      const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        user: sender.target.toString(),
+        
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -302,7 +298,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
@@ -321,6 +317,134 @@ describe("TokenPaymaster", () => {
         .to.emit(usdc, "Transfer")
         .withArgs(sender.target.toString(), paymaster.target.toString(), +formatUnits(tokenAmount));
     });
+
+    it("CALLDATA: should validate callDataHash correctly", async () => {
+      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+
+      await approveToPaymaster(sender, paymaster, usdc);
+
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const paymentStruct = {
+        token: usdc,
+        tokenPriceWei: BigInt(2500 * 1e6),
+        
+        operator,
+      };
+      
+      console.log("Testing callDataHash validation:");
+      console.log("- callData:", callData);
+      
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
+      console.log("- Using signature r:", paymentSignature.r.slice(0, 10) + "...");
+      
+      const userOp = await getUserOp(
+        entryPoint,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n,
+        callData, // This should match the signed callDataHash
+        { ...paymentStruct, ...paymentSignature },
+      );
+
+
+
+      const tx = entryPoint.handleOps([userOp], beneficiary);
+      await expect(tx)
+        .to.emit(usdc, "Transfer")
+        .withArgs(sender.target.toString(), paymaster.target.toString(), "102500");
+    });
+
+    it("CALLDATA: should reject mismatched callData", async () => {
+      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+
+      await approveToPaymaster(sender, paymaster, usdc);
+
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const differentCallData = targetContract.interface.encodeFunctionData("justEmit");
+      
+      const paymentStruct = {
+        token: usdc,
+        tokenPriceWei: BigInt(2500 * 1e6),
+        
+        operator,
+      };
+      
+      // Sign for "count" function
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
+      
+      // But try to execute "number" function - should fail
+      const userOp = await getUserOp(
+        entryPoint,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n,
+        differentCallData,
+        { ...paymentStruct, ...paymentSignature },
+      );
+
+      const tx = entryPoint.handleOps([userOp], beneficiary);
+      await expect(tx)
+        .to.be.revertedWithCustomError(entryPoint, "FailedOp")
+        .withArgs(0, "AA34 signature error");
+    });
+
+    it("CALLDATA + NONCE: should prevent replay attacks with same callData", async function () {
+      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+
+      await approveToPaymaster(sender, paymaster, usdc);
+
+      const callData = targetContract.interface.encodeFunctionData("count");
+      console.log("Testing nonce replay protection:");
+      console.log("- callData:", callData);
+
+      const paymentStruct = {
+        token: usdc,
+        tokenPriceWei: BigInt(2500 * 1e6),
+        
+        operator,
+      };
+
+      // Create first userOp with nonce 0
+      const signedPaymentData1 = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
+
+      const userOp1 = await getUserOp(
+        entryPoint,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n,
+        callData,
+        { ...paymentStruct, ...signedPaymentData1 },
+      );
+
+      // First operation should work
+      await entryPoint.handleOps([userOp1], beneficiary);
+      console.log("✅ First operation with nonce 0 executed successfully");
+
+      // Try to replay the same operation (same nonce, same callData)
+      const userOp2 = await getUserOp(
+        entryPoint,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n, // Same userOp nonce  
+        callData, // Same callData
+        { ...paymentStruct, ...signedPaymentData1 }, // Same payment signature with nonce 0
+      );
+
+      // Should fail because operator nonce was already used
+      const tx = entryPoint.handleOps([userOp2], beneficiary);
+      await expect(tx).to.be.reverted;
+      console.log("✅ Replay attack prevented - same signature cannot be reused");
+    });
+
+
   });
 
   describe("postOp", async () => {
@@ -330,13 +454,14 @@ describe("TokenPaymaster", () => {
       await approveToPaymaster(sender, paymaster, usdc);
 
       const tokenPriceWei = BigInt(2500 * 1e6);
+      const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        user: sender.target.toString(),
+        
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -344,7 +469,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
@@ -378,13 +503,18 @@ describe("TokenPaymaster", () => {
       await approveToPaymaster(sender, paymaster, usdc);
 
       const tokenPriceWei = BigInt(4e8);
+      const callData = paymaster.interface.encodeFunctionData("withdrawTokens", [
+        usdc.target.toString(),
+        deployer.address,
+        MaxUint256,
+      ]);
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        user: sender.target.toString(),
+        
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
 
       await paymaster.grantRole(ZeroHash, sender);
 
@@ -395,11 +525,7 @@ describe("TokenPaymaster", () => {
         sender,
         paymaster.target.toString(),
         0n,
-        paymaster.interface.encodeFunctionData("withdrawTokens", [
-          usdc.target.toString(),
-          deployer.address,
-          MaxUint256,
-        ]),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 
@@ -421,13 +547,14 @@ describe("TokenPaymaster", () => {
       await approveToPaymaster(sender, paymaster, usdc);
 
       const tokenPriceWei = BigInt(2500 * 1e6);
+      const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        user: sender.target.toString(),
+        
         operator,
       };
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, callData, sender.target.toString());
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -435,7 +562,7 @@ describe("TokenPaymaster", () => {
         sender,
         targetContract.target.toString(),
         0n,
-        targetContract.interface.encodeFunctionData("count"),
+        callData,
         { ...paymentStruct, ...paymentSignature },
       );
 

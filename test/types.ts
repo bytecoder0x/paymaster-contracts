@@ -7,14 +7,13 @@ export type Uint256 = number | bigint;
 
 export interface PaymasterPaymentDataStruct {
   token: IERC20;
-  tokenPriceWei: Uint256;
-  user: string;
+  tokenPriceWei: Uint256; // Still uint256 in tests, will be cast to uint64 in encoding
   operator: SignerWithAddress;
 }
 
 export interface PaymasterPaymentDataStructSigned extends PaymasterPaymentDataStruct {
-  nonce: Uint256;
-  deadline: Uint256;
+  nonce: Uint256; // Still uint256 in tests, will be cast to uint32 in encoding
+  deadline: Uint256; // Still uint256 in tests, will be cast to uint32 in encoding
   v: Uint256;
   r: BytesLike;
   s: BytesLike;
