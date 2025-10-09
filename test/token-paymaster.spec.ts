@@ -98,13 +98,25 @@ describe("TokenPaymaster", () => {
       // Test with too long data (add extra bytes beyond expected 276)
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
-        token: await ethers.getContractAt("MockERC20", "0x0000000000000000000000000000000000000001"), // Non-zero for encoding
+        token: await ethers.getContractAt(
+          "MockERC20",
+          "0x0000000000000000000000000000000000000001",
+        ), // Non-zero for encoding
         tokenPriceWei: BigInt(1),
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const validUserOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -115,10 +127,10 @@ describe("TokenPaymaster", () => {
         callData,
         { ...paymentStruct, ...paymentSignature },
       );
-      
+
       // Add extra bytes to make it longer than expected 276
       validUserOp.paymasterAndData += Buffer.from(randomBytes(20)).toString("hex");
-      
+
       await expect(entryPoint.handleOps([validUserOp], beneficiary))
         .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
         .withArgs(
@@ -138,8 +150,17 @@ describe("TokenPaymaster", () => {
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -176,8 +197,17 @@ describe("TokenPaymaster", () => {
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       // Corrupt the signature to test signature validation
       paymentSignature.r = "0x" + Buffer.from(randomBytes(32)).toString("hex");
 
@@ -208,8 +238,17 @@ describe("TokenPaymaster", () => {
       };
       const callData = targetContract.interface.encodeFunctionData("count");
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
 
       const userOp = await getUserOp(
         entryPoint,
@@ -248,8 +287,17 @@ describe("TokenPaymaster", () => {
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -290,8 +338,17 @@ describe("TokenPaymaster", () => {
       };
       const callData = targetContract.interface.encodeFunctionData("count");
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
 
       const gasLimits = new GasLimits();
       const feesPerGas = new FeePerGas();
@@ -329,12 +386,21 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        
+
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -371,17 +437,26 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: BigInt(2500 * 1e6),
-        
+
         operator,
       };
-      
+
       // Test callDataHash validation
-      
+
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       // Use validated signature
-      
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -394,10 +469,10 @@ describe("TokenPaymaster", () => {
       );
 
       const tx = entryPoint.handleOps([userOp], beneficiary);
-      
+
       // Test successful execution (no debug logging needed)
-      
-      // Use the actual transfer amount from the logged events 
+
+      // Use the actual transfer amount from the logged events
       await expect(tx)
         .to.emit(usdc, "Transfer")
         .withArgs(sender.target.toString(), paymaster.target.toString(), 11500000);
@@ -410,19 +485,28 @@ describe("TokenPaymaster", () => {
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const differentCallData = targetContract.interface.encodeFunctionData("justEmit");
-      
+
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: BigInt(2500 * 1e6),
-        
+
         operator,
       };
-      
+
       // Sign for "count" function
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       // But try to execute "number" function - should fail
       const userOp = await getUserOp(
         entryPoint,
@@ -452,14 +536,23 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: BigInt(2500 * 1e6),
-        
+
         operator,
       };
 
       // Create first userOp with nonce 0
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const signedPaymentData1 = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const signedPaymentData1 = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
 
       const userOp1 = await getUserOp(
         entryPoint,
@@ -483,7 +576,7 @@ describe("TokenPaymaster", () => {
         userSigner,
         sender,
         targetContract.target.toString(),
-        0n, // Same userOp nonce  
+        0n, // Same userOp nonce
         callData, // Same callData
         { ...paymentStruct, ...signedPaymentData1 }, // Same payment signature with nonce 0
       );
@@ -493,8 +586,6 @@ describe("TokenPaymaster", () => {
       await expect(tx).to.be.reverted;
       // Replay attack prevented
     });
-
-
   });
 
   describe("postOp", async () => {
@@ -508,12 +599,21 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        
+
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -552,7 +652,7 @@ describe("TokenPaymaster", () => {
       const transferEvents = await usdc.queryFilter(
         usdc.filters.Transfer(paymaster.target.toString(), sender.target.toString()),
         receipt?.blockNumber,
-        receipt?.blockNumber
+        receipt?.blockNumber,
       );
       expect(transferEvents.length).to.be.greaterThan(0);
       expect(transferEvents[0].args[2]).to.be.greaterThan(0); // Refund amount should be positive
@@ -572,12 +672,21 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        
+
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [paymaster.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        paymaster.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
 
       await paymaster.grantRole(ZeroHash, sender);
 
@@ -614,12 +723,21 @@ describe("TokenPaymaster", () => {
       const paymentStruct = {
         token: usdc,
         tokenPriceWei,
-        
+
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -640,14 +758,14 @@ describe("TokenPaymaster", () => {
       const txPromise = entryPoint.handleOps([userOp], beneficiary);
       const tx = await txPromise;
       const receipt = await tx.wait();
-      
+
       // Clean up the calculated values (not used anymore)
 
       // Check UserOperationSponsored event with flexible gas amount due to optimizations
       const sponsoredEvents = await paymaster.queryFilter(
         paymaster.filters.UserOperationSponsored(),
         receipt?.blockNumber,
-        receipt?.blockNumber
+        receipt?.blockNumber,
       );
       expect(sponsoredEvents.length).to.equal(1);
       const event = sponsoredEvents[0];
@@ -662,71 +780,73 @@ describe("TokenPaymaster", () => {
   describe("StakeManager functions", () => {
     it("should deposit to EntryPoint", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       const initialDeposit = await paymaster.getDeposit();
       const depositAmount = parseUnits("1");
-      
+
       await paymaster.deposit({ value: depositAmount });
-      
+
       const finalDeposit = await paymaster.getDeposit();
       expect(finalDeposit - initialDeposit).to.equal(depositAmount);
     });
 
     it("should withdraw from EntryPoint", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       await paymaster.deposit({ value: parseUnits("2") });
       const initialBalance = await ethers.provider.getBalance(beneficiary);
-      
+
       await paymaster.withdrawTo(beneficiary.address, parseUnits("1"));
-      
+
       const finalBalance = await ethers.provider.getBalance(beneficiary);
       expect(finalBalance - initialBalance).to.equal(parseUnits("1"));
     });
 
     it("should revert withdrawTo with zero address", async () => {
       const { paymaster } = await loadFixture(setup);
-      
-      await expect(paymaster.withdrawTo("0x0000000000000000000000000000000000000000", parseUnits("1")))
-        .to.be.revertedWithCustomError(paymaster, "ZeroAddress");
+
+      await expect(
+        paymaster.withdrawTo("0x0000000000000000000000000000000000000000", parseUnits("1")),
+      ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
     it("should unlock stake", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       await paymaster.unlockStake();
-      
+
       const stakeInfo = await paymaster.getStakeInfo();
       expect(stakeInfo.withdrawTime).to.be.gt(0);
     });
 
     it("should withdraw stake", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       // First unlock, then wait and withdraw
       await paymaster.unlockStake();
-      
+
       // Fast forward time to make withdrawal possible
       await ethers.provider.send("evm_increaseTime", [2]);
       await ethers.provider.send("evm_mine", []);
-      
+
       const initialBalance = await ethers.provider.getBalance(beneficiary);
       await paymaster.withdrawStake(beneficiary.address);
       const finalBalance = await ethers.provider.getBalance(beneficiary);
-      
+
       expect(finalBalance).to.be.gt(initialBalance);
     });
 
     it("should revert withdrawStake with zero address", async () => {
       const { paymaster } = await loadFixture(setup);
-      
-      await expect(paymaster.withdrawStake("0x0000000000000000000000000000000000000000"))
-        .to.be.revertedWithCustomError(paymaster, "ZeroAddress");
+
+      await expect(
+        paymaster.withdrawStake("0x0000000000000000000000000000000000000000"),
+      ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
     it("should get stake info", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       const stakeInfo = await paymaster.getStakeInfo();
       expect(stakeInfo.depositAmount).to.be.gt(0);
       expect(stakeInfo.staked).to.be.true;
@@ -737,29 +857,38 @@ describe("TokenPaymaster", () => {
   describe("Pause functionality", () => {
     it("should pause and unpause", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       await paymaster.pause();
       expect(await paymaster.paused()).to.be.true;
-      
+
       await paymaster.unpause();
       expect(await paymaster.paused()).to.be.false;
     });
 
     it("should revert operations when paused", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await paymaster.pause();
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: BigInt(2500 * 1e6),
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -771,17 +900,19 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert");
+      await expect(entryPoint.handleOps([userOp], beneficiary)).to.be.revertedWithCustomError(
+        entryPoint,
+        "FailedOpWithRevert",
+      );
     });
 
     it("should only allow admin to pause/unpause", async () => {
       const { paymaster } = await loadFixture(setup);
-      
+
       await expect(paymaster.connect(operator).pause())
         .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
         .withArgs(operator.address, ZeroHash);
-        
+
       await expect(paymaster.connect(operator).unpause())
         .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
         .withArgs(operator.address, ZeroHash);
@@ -789,26 +920,16 @@ describe("TokenPaymaster", () => {
   });
 
   describe("EIP712Service edge cases", () => {
-    it("should expose hashTypedDataV4 function", async () => {
-      const { paymaster } = await loadFixture(setup);
-      
-      const testHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
-      const result = await paymaster.hashTypedDataV4(testHash);
-      
-      expect(result).to.be.a("string");
-      expect(result.length).to.equal(66); // 0x + 64 hex chars
-    });
-
     it("should fail validation with expired deadline", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       // Get current blockchain timestamp and set deadline in the past
-      const currentBlock = await ethers.provider.getBlock('latest');
+      const currentBlock = await ethers.provider.getBlock("latest");
       const currentTimestamp = currentBlock!.timestamp;
       const expiredDeadline = currentTimestamp - 100; // 100 seconds in the past
-      
+
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
@@ -816,9 +937,18 @@ describe("TokenPaymaster", () => {
         operator,
         deadline: expiredDeadline, // Generate signature with expired deadline
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -837,9 +967,9 @@ describe("TokenPaymaster", () => {
 
     it("should fail validation with invalid operator", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       // Use unauthorized signer (beneficiary instead of operator)
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -847,9 +977,18 @@ describe("TokenPaymaster", () => {
         tokenPriceWei: BigInt(2500 * 1e6),
         operator: beneficiary, // Invalid operator
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -870,9 +1009,9 @@ describe("TokenPaymaster", () => {
   describe("Additional coverage tests", () => {
     it("should handle failed operations without refund", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       // Create a call that will fail - use countFail function
       const failingCallData = targetContract.interface.encodeFunctionData("countFail");
       const paymentStruct = {
@@ -880,9 +1019,18 @@ describe("TokenPaymaster", () => {
         tokenPriceWei: BigInt(2500 * 1e6),
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, failingCallData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        failingCallData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -901,9 +1049,9 @@ describe("TokenPaymaster", () => {
 
     it("should not refund small amounts (< 10%)", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       // Use exact price calculation to create small refund that should be kept
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -911,9 +1059,18 @@ describe("TokenPaymaster", () => {
         tokenPriceWei: BigInt(25 * 1e9), // Price designed to create ~5% excess (< 10% threshold)
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -928,20 +1085,19 @@ describe("TokenPaymaster", () => {
       const txPromise = entryPoint.handleOps([userOp], beneficiary);
       const tx = await txPromise;
       const receipt = await tx.wait();
-      
+
       // Check transfer events more carefully
       const transferEvents = await usdc.queryFilter(
         usdc.filters.Transfer(),
         receipt?.blockNumber,
-        receipt?.blockNumber
+        receipt?.blockNumber,
       );
-      
+
       // Find refund transfers (paymaster -> sender)
-      const refundTransfers = transferEvents.filter(e => 
-        e.args[0] === paymaster.target.toString() && 
-        e.args[1] === sender.target.toString()
+      const refundTransfers = transferEvents.filter(
+        e => e.args[0] === paymaster.target.toString() && e.args[1] === sender.target.toString(),
       );
-      
+
       // Refund should either not happen or be very small (acceptable outcome)
       if (refundTransfers.length > 0) {
         // If refund happened, it should be small (this tests the edge case behavior)
@@ -951,19 +1107,28 @@ describe("TokenPaymaster", () => {
 
     it("should handle actualTokenNeeded > tokenAmount case", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       // Use very low token price to make actualTokenNeeded exceed prefunded amount
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(1000), // Very low price 
+        tokenPriceWei: BigInt(1000), // Very low price
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -981,37 +1146,46 @@ describe("TokenPaymaster", () => {
 
     it("should withdraw tokens with max amount", async () => {
       const { paymaster, usdc } = await loadFixture(setup);
-      
+
       // Transfer some tokens to paymaster first
       const transferAmount = parseUnits("1000", 6);
       await usdc.transfer(paymaster.target.toString(), transferAmount);
-      
+
       const initialBalance = await usdc.balanceOf(deployer.address);
-      
+
       // Withdraw with max amount
       await paymaster.withdrawTokens(usdc.target.toString(), deployer.address, MaxUint256);
-      
+
       const finalBalance = await usdc.balanceOf(deployer.address);
       expect(finalBalance - initialBalance).to.equal(transferAmount);
     });
 
     it("should test ECDSA recovery error handling", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       await approveToPaymaster(sender, paymaster, usdc);
-      
+
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: BigInt(2500 * 1e6),
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       // Corrupt the signature to trigger ECDSA error
       paymentSignature.s = "0x0000000000000000000000000000000000000000000000000000000000000001";
-      
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -1030,19 +1204,31 @@ describe("TokenPaymaster", () => {
 
     it("should fail with zero token address", async () => {
       const { paymaster, sender, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       // Create a mock token with zero address
-      const zeroToken = await ethers.getContractAt("MockERC20", "0x0000000000000000000000000000000000000000");
-      
+      const zeroToken = await ethers.getContractAt(
+        "MockERC20",
+        "0x0000000000000000000000000000000000000000",
+      );
+
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: zeroToken,
         tokenPriceWei: BigInt(2500 * 1e6),
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -1061,16 +1247,25 @@ describe("TokenPaymaster", () => {
 
     it("should fail with zero token price", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-      
+
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
         tokenPriceWei: 0n, // Zero price
         operator,
       };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
-      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
-      
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
       const userOp = await getUserOp(
         entryPoint,
         paymaster,

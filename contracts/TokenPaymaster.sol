@@ -10,18 +10,16 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaster.sol";
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
-import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ZeroAddress, ZeroUint256} from "./errors/PaymasterErrors.sol";
+import {ValidationModifiers} from "./components/ValidationModifiers.sol";
+import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength} from "./errors/PaymasterErrors.sol";
 
-contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausable {
+contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, Pausable {
     using SafeERC20 for IERC20;
 
     uint256 public immutable postOpCost;
-    
-    /// @dev Context length constants
+
     uint256 private constant CONTEXT_LENGTH = 136;
     uint256 private constant PAYMASTER_DATA_LENGTH = 276; // 52 + 224 bytes (paymaster address + gas limits + PaymasterPaymentData)
-    
-    /// @dev Gas optimization constants
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
 
     constructor(
@@ -29,10 +27,7 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
         address operator,
         address entryPoint_,
         uint256 postOpCost_
-    ) StakeManager(entryPoint_) EIP712Service(operator) {
-        if (owner == address(0)) revert ZeroAddress();
-        if (postOpCost_ == 0) revert ZeroUint256();
-        
+    ) nonZeroAddress(owner) nonZeroUint256(postOpCost_) StakeManager(entryPoint_) EIP712Service(operator) {
         postOpCost = postOpCost_;
         _grantRole(DEFAULT_ADMIN_ROLE, owner);
     }
@@ -60,7 +55,7 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
         if (validationData == SIG_VALIDATION_FAILED) return (bytes(""), SIG_VALIDATION_FAILED);
 
         uint256 maxFeePerGas = UserOperationLib.unpackMaxFeePerGas(userOp);
-        
+
         // Gas optimization: Use unchecked arithmetic where overflow is impossible
         uint256 tokenAmount;
         unchecked {
@@ -83,18 +78,16 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
     ) external onlyEntryPoint whenNotPaused {
         if (context.length != CONTEXT_LENGTH) revert InvalidPostOpContextLength(context.length);
 
-        (
-            address token,
-            uint256 tokenAmount,
-            uint256 tokenPriceWei,
-            address sender,
-            bytes32 userOpHash
-        ) = _parseContext(context);
+        (address token, uint256 tokenAmount, uint256 tokenPriceWei, address sender, bytes32 userOpHash) = _parseContext(
+            context
+        );
 
         // Gas optimization: Calculate actual token needed with unchecked arithmetic
         uint256 actualTokenNeeded;
         unchecked {
-            actualTokenNeeded = ((actualGasCost + postOpCost * actualUserOpFeePerGas) * tokenPriceWei) / TOKEN_PRICE_DENOMINATOR;
+            actualTokenNeeded =
+                ((actualGasCost + postOpCost * actualUserOpFeePerGas) * tokenPriceWei) /
+                TOKEN_PRICE_DENOMINATOR;
         }
 
         // Cap actual token needed to pre-authorized amount
@@ -103,21 +96,23 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
         }
 
         // Refund excess tokens to user if operation succeeded and refund is significant (>10%)
+        // If operation failed, we keep the pre-charged amount as penalty to prevent griefing attacks
         if (mode == PostOpMode.opSucceeded && tokenAmount > actualTokenNeeded) {
             uint256 refundAmount = tokenAmount - actualTokenNeeded;
             // Only refund if the excess is more than 10% of actual cost to avoid micro-transactions
-            if (refundAmount > actualTokenNeeded * 10 / 100) {
+            if (refundAmount > (actualTokenNeeded * 10) / 100) {
                 IERC20(token).safeTransfer(sender, refundAmount);
             }
         }
-        // If operation failed, we keep the pre-charged amount as penalty
-        // to prevent griefing attacks
 
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
     }
 
-    function withdrawTokens(IERC20 token, address recipient, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (recipient == address(0)) revert ZeroAddress();
+    function withdrawTokens(
+        IERC20 token,
+        address recipient,
+        uint256 amount
+    ) external nonZeroAddress(recipient) nonZeroUint256(amount) onlyRole(DEFAULT_ADMIN_ROLE) {
         if (amount == type(uint256).max) amount = token.balanceOf(address(this));
         token.safeTransfer(recipient, amount);
     }
@@ -126,26 +121,26 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
      * @notice Securely parses context data using assembly for gas efficiency
      * @param context The context bytes to parse
      * @return token The token address
-     * @return tokenAmount The token amount 
+     * @return tokenAmount The token amount
      * @return tokenPriceWei The token price in wei
      * @return sender The sender address
      * @return userOpHash The user operation hash
      */
-    function _parseContext(bytes calldata context) private pure returns (
-        address token,
-        uint256 tokenAmount,
-        uint256 tokenPriceWei,
-        address sender,
-        bytes32 userOpHash
-    ) {
+    function _parseContext(
+        bytes calldata context
+    )
+        private
+        pure
+        returns (address token, uint256 tokenAmount, uint256 tokenPriceWei, address sender, bytes32 userOpHash)
+    {
         assembly {
             // Load data directly from calldata using assembly for gas efficiency
             // shr(96, ...) shifts right by 96 bits to extract address (160 bits) from 256-bit word
-            token := shr(96, calldataload(add(context.offset, 0)))      // bytes 0-19: address (20 bytes)
-            tokenAmount := calldataload(add(context.offset, 20))        // bytes 20-51: uint256 (32 bytes)
-            tokenPriceWei := calldataload(add(context.offset, 52))      // bytes 52-83: uint256 (32 bytes)
-            sender := shr(96, calldataload(add(context.offset, 84)))    // bytes 84-103: address (20 bytes)
-            userOpHash := calldataload(add(context.offset, 104))        // bytes 104-135: bytes32 (32 bytes)
+            token := shr(96, calldataload(add(context.offset, 0))) // bytes 0-19: address (20 bytes)
+            tokenAmount := calldataload(add(context.offset, 20)) // bytes 20-51: uint256 (32 bytes)
+            tokenPriceWei := calldataload(add(context.offset, 52)) // bytes 52-83: uint256 (32 bytes)
+            sender := shr(96, calldataload(add(context.offset, 84))) // bytes 84-103: address (20 bytes)
+            userOpHash := calldataload(add(context.offset, 104)) // bytes 104-135: bytes32 (32 bytes)
         }
     }
 

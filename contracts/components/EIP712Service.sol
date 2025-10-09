@@ -7,9 +7,9 @@ import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions
 import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
 
 import {PaymasterPaymentData} from "../interfaces/ITokenPaymaster.sol";
-import {ZeroAddress, ZeroUint256, InvalidSender} from "../errors/PaymasterErrors.sol";
+import {ValidationModifiers} from "./ValidationModifiers.sol";
 
-abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
+abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable, EIP712 {
     /// @dev Mapping: operator => user => nonce (for replay protection)
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
@@ -20,31 +20,15 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
 
-    constructor(address operator) EIP712("TokenPaymaster", "1") {
-        if (operator == address(0)) revert ZeroAddress();
+    constructor(address operator) nonZeroAddress(operator) EIP712("TokenPaymaster", "1") {
         _grantRole(OPERATOR_ROLE, operator);
-    }
-
-    /**
-     * @notice Computes the EIP-712 compliant hash for the given struct data.
-     * @dev This function uses the `_hashTypedDataV4` function from the parent contract to generate the hash.
-     * It is used for EIP-712 signature validation.
-     * @param structHash The hash of the struct data to be typed.
-     * @return The EIP-712 compliant hash of the given struct data.
-     */
-    function hashTypedDataV4(bytes32 structHash) external view returns (bytes32) {
-        return super._hashTypedDataV4(structHash);
     }
 
     function _validatePaymentSignature(
         address from,
         PaymasterPaymentData memory param,
         bytes calldata callData
-    ) internal returns (uint256 validationData) {
-        // Basic validation
-        if (param.token == address(0)) revert ZeroAddress();
-        if (param.tokenPriceWei == 0) revert ZeroUint256();
-
+    ) internal nonZeroAddress(param.token) nonZeroUint256(param.tokenPriceWei) returns (uint256 validationData) {
         // Check signature deadline
         if (param.deadline < block.timestamp) {
             return SIG_VALIDATION_FAILED;
@@ -58,18 +42,14 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
             param.tokenPriceWei,
-            from,              // user address (from userOp.sender)
-            callDataHash,      // callData hash (computed from userOp.callData)
-            param.nonce,       // nonce for replay protection
+            from, // user address (from userOp.sender)
+            callDataHash, // callData hash (computed from userOp.callData)
+            param.nonce, // nonce for replay protection
             param.deadline
         );
 
         bytes32 digest = _hashTypedDataV4(keccak256(encodedData));
-        (address recovered, ECDSA.RecoverError error,) = ECDSA.tryRecover(digest, param.v, param.r, param.s);
-        
-        if (error != ECDSA.RecoverError.NoError) {
-            return SIG_VALIDATION_FAILED;
-        }
+        (address recovered, , ) = ECDSA.tryRecover(digest, param.v, param.r, param.s);
 
         // Check the recovered address has operator role
         if (recovered == address(0) || !hasRole(OPERATOR_ROLE, recovered)) {
@@ -77,16 +57,16 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         }
 
         // Validate nonce to prevent replay attacks (using recovered operator address)
-        uint256 currentNonce = operatorUserNonces[recovered][from];
-        if (param.nonce != currentNonce) {
+        if (param.nonce != _useNonce(recovered, from)) {
             return SIG_VALIDATION_FAILED;
         }
-
-        // Update nonce after successful validation - more gas efficient than separate read/increment
-        operatorUserNonces[recovered][from] = currentNonce + 1;
 
         return SIG_VALIDATION_SUCCESS;
     }
 
-
+    function _useNonce(address operator, address from) private returns (uint256) {
+        unchecked {
+            return operatorUserNonces[operator][from]++;
+        }
+    }
 }
