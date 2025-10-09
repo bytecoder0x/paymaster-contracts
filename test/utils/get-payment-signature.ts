@@ -8,7 +8,7 @@ import { PaymasterPaymentDataStruct } from "../types";
 export async function getPaymentSignature(
   paymasterContract: TokenPaymaster,
   paymentStruct: PaymasterPaymentDataStruct,
-  callData: string,  // callData to be signed
+  userOpCallData: string,  // Full userOp.callData to be signed
   user: string       // user address (from userOp.sender)
 ) {
   const { token, tokenPriceWei, operator } = paymentStruct;
@@ -22,8 +22,8 @@ export async function getPaymentSignature(
   ]);
   const deadline = currentTimestamp + SIGNATURE_VALIDITY;
 
-  // Hash the callData that will be allowed
-  const callDataHash = keccak256(callData);
+  // Hash the userOp.callData that will be allowed
+  const callDataHash = keccak256(userOpCallData);
 
   const domain = {
     name: "TokenPaymaster",
@@ -31,8 +31,6 @@ export async function getPaymentSignature(
     chainId: network.config.chainId || 31337,
     verifyingContract,
   };
-
-  console.log("EIP712 Domain:", domain);
 
   const types = {
     PaymasterPaymentData: [
@@ -54,13 +52,8 @@ export async function getPaymentSignature(
     deadline,
   };
 
-  console.log("EIP712 Value:", value);
-  
   const signatureString = await operator.signTypedData(domain, types, value);
   const { v, r, s } = Signature.from(signatureString);
-
-  console.log("Generated signature components - v:", v, "r:", r, "s:", s);
-  console.log("Using nonce:", currentNonce);
   
   return { nonce: currentNonce, deadline, v, r, s };
 }
