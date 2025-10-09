@@ -63,7 +63,7 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
             param.nonce,       // nonce for replay protection
             param.deadline
         );
-        
+
         bytes32 digest = _hashTypedDataV4(keccak256(encodedData));
         (address recovered, ECDSA.RecoverError error,) = ECDSA.tryRecover(digest, param.v, param.r, param.s);
         
@@ -77,14 +77,14 @@ abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
         }
 
         // Validate nonce to prevent replay attacks (using recovered operator address)
-        uint256 expectedNonce = operatorUserNonces[recovered][from];
-        if (param.nonce != expectedNonce) {
+        uint256 currentNonce = operatorUserNonces[recovered][from];
+        if (param.nonce != currentNonce) {
             return SIG_VALIDATION_FAILED;
         }
 
-        // Increment nonce after successful validation
-        operatorUserNonces[recovered][from]++;
-        
+        // Update nonce after successful validation - more gas efficient than separate read/increment
+        operatorUserNonces[recovered][from] = currentNonce + 1;
+
         return SIG_VALIDATION_SUCCESS;
     }
 
