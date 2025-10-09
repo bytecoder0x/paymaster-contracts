@@ -76,6 +76,7 @@ describe("TokenPaymaster", () => {
     it("should revert if paymaster data has wrong length", async () => {
       const { paymaster, entryPoint, sender, targetContract } = await loadFixture(setup);
 
+      // Test with too short data (only paymaster address + gas limits, no PaymasterPaymentData)
       const userOp = await getUserOp(
         entryPoint,
         paymaster,
@@ -94,13 +95,36 @@ describe("TokenPaymaster", () => {
           paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [52]),
         );
 
-      userOp.paymasterAndData += Buffer.from(randomBytes(340)).toString("hex");
-      await expect(entryPoint.handleOps([userOp], beneficiary))
+      // Test with too long data (add extra bytes beyond expected 276)
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const paymentStruct = {
+        token: await ethers.getContractAt("MockERC20", "0x0000000000000000000000000000000000000001"), // Non-zero for encoding
+        tokenPriceWei: BigInt(1),
+        operator,
+      };
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [targetContract.target.toString(), 0n, callData]);
+      const paymentSignature = await getPaymentSignature(paymaster, paymentStruct, userOpCallData, sender.target.toString());
+      
+      const validUserOp = await getUserOp(
+        entryPoint,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n,
+        callData,
+        { ...paymentStruct, ...paymentSignature },
+      );
+      
+      // Add extra bytes to make it longer than expected 276
+      validUserOp.paymasterAndData += Buffer.from(randomBytes(20)).toString("hex");
+      
+      await expect(entryPoint.handleOps([validUserOp], beneficiary))
         .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
         .withArgs(
           0,
           "AA33 reverted",
-          paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [392]),
+          paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [296]), // 276 + 20
         );
     });
 

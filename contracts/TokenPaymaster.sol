@@ -19,8 +19,7 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
     
     /// @dev Context length constants
     uint256 private constant CONTEXT_LENGTH = 136;
-    uint256 private constant MIN_PAYMASTER_DATA_LENGTH = 276; // 52 + 224 bytes (ABI encoded struct with smaller types)
-    uint256 private constant MAX_PAYMASTER_DATA_LENGTH = 300; // With some padding
+    uint256 private constant PAYMASTER_DATA_LENGTH = 276; // 52 + 224 bytes (paymaster address + gas limits + PaymasterPaymentData)
     
     /// @dev Gas optimization constants
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
@@ -153,15 +152,12 @@ contract TokenPaymaster is ITokenPaymaster, StakeManager, EIP712Service, Pausabl
     function _validateAndDecodePaymasterAndData(
         PackedUserOperation calldata userOp
     ) private returns (address token, uint256 tokenPriceWei, uint256 validationData) {
-        uint256 length = userOp.paymasterAndData.length;
-
-        // 52 bytes => paymaster address + gas limit data
-        // 288 bytes => PaymasterPaymentData struct (32 x 9)
-        if (length < MIN_PAYMASTER_DATA_LENGTH || length > MAX_PAYMASTER_DATA_LENGTH) {
+        // Validate exact paymaster data length for fixed PaymasterPaymentData structure
+        if (userOp.paymasterAndData.length != PAYMASTER_DATA_LENGTH) {
             revert InvalidPaymasterAndDataLength(userOp.paymasterAndData.length);
         }
 
-        // Temporarily use abi.decode for debugging, then optimize with manual decoding
+        // Decode PaymasterPaymentData from fixed offset
         PaymasterPaymentData memory paymentData = abi.decode(
             userOp.paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:],
             (PaymasterPaymentData)
