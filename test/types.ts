@@ -9,6 +9,7 @@ export interface PaymasterPaymentDataStruct {
   token: IERC20;
   tokenPriceWei: Uint256; // Still uint256 in tests, will be cast to uint64 in encoding
   operator: SignerWithAddress;
+  deadline?: Uint256; // Optional deadline for custom expiration tests
 }
 
 export interface PaymasterPaymentDataStructSigned extends PaymasterPaymentDataStruct {

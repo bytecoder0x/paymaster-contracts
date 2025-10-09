@@ -20,7 +20,9 @@ export async function getPaymentSignature(
     getCurrentTimestamp(),
     paymasterContract.getAddress(),
   ]);
-  const deadline = currentTimestamp + SIGNATURE_VALIDITY;
+  
+  // Use provided deadline if available, otherwise use default
+  const deadline = paymentStruct.deadline || (currentTimestamp + SIGNATURE_VALIDITY);
 
   // Hash the userOp.callData that will be allowed
   const callDataHash = keccak256(userOpCallData);
