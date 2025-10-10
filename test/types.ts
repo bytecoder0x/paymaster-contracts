@@ -2,8 +2,7 @@ import { BytesLike } from "ethers";
 import { IERC20 } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { FEES, GAS } from "./constants";
-
-export type Uint256 = number | bigint;
+import { Uint256 } from "../types";
 
 export interface PaymasterPaymentDataStruct {
   token: IERC20;

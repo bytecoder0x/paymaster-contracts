@@ -1,8 +1,9 @@
 import { AbiCoder, BytesLike, getBytes, HDNodeWallet, solidityPacked } from "ethers";
 import { IPaymaster, SimpleAccount } from "../../typechain-types";
 import { PackedUserOperationStruct } from "../../typechain-types/contracts/TokenPaymaster";
-import { FeePerGas, GasLimits, PaymasterPaymentDataStructSigned, Uint256 } from "../types";
+import { FeePerGas, GasLimits, PaymasterPaymentDataStructSigned } from "../types";
 import { IEntryPoint } from "../../typechain-types";
+import { Uint256 } from "../../types";
 
 export async function getUserOp(
   entryPoint: IEntryPoint,
@@ -64,7 +65,7 @@ function encodePaymasterAndData(
       "uint256", // tokenPriceWei (back to uint256 for debugging)
       "uint256", // nonce (back to uint256 for debugging)
       "uint256", // deadline (back to uint256 for debugging)
-      "uint8",   // v
+      "uint8", // v
       "bytes32", // r
       "bytes32", // s
     ],
