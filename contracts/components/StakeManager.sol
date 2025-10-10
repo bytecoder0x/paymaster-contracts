@@ -3,10 +3,12 @@ pragma solidity 0.8.28;
 
 import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions/AccessControlEnumerable.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {IStakeManager} from "@account-abstraction/contracts/interfaces/IStakeManager.sol";
 
+import {ValidationModifiers} from "./ValidationModifiers.sol";
 import {OnlyEntryPoint} from "../errors/PaymasterErrors.sol";
 
-abstract contract StakeManager is AccessControlEnumerable {
+abstract contract StakeManager is ValidationModifiers, AccessControlEnumerable {
     IEntryPoint public immutable entryPoint;
 
     modifier onlyEntryPoint() {
@@ -14,7 +16,7 @@ abstract contract StakeManager is AccessControlEnumerable {
         _;
     }
 
-    constructor(address entryPoint_) {
+    constructor(address entryPoint_) nonZeroAddress(entryPoint_) {
         entryPoint = IEntryPoint(entryPoint_);
     }
 
@@ -22,7 +24,10 @@ abstract contract StakeManager is AccessControlEnumerable {
         entryPoint.depositTo{value: msg.value}(address(this));
     }
 
-    function withdrawTo(address payable withdrawAddress, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function withdrawTo(
+        address payable withdrawAddress,
+        uint256 amount
+    ) external nonZeroAddress(withdrawAddress) onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.withdrawTo(withdrawAddress, amount);
     }
 
@@ -30,15 +35,26 @@ abstract contract StakeManager is AccessControlEnumerable {
         entryPoint.addStake{value: msg.value}(unstakeDelaySec);
     }
 
-    function getDeposit() external view returns (uint256) {
-        return entryPoint.balanceOf(address(this));
-    }
-
     function unlockStake() external onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.unlockStake();
     }
 
-    function withdrawStake(address payable withdrawAddress) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function withdrawStake(
+        address payable withdrawAddress
+    ) external nonZeroAddress(withdrawAddress) onlyRole(DEFAULT_ADMIN_ROLE) {
         entryPoint.withdrawStake(withdrawAddress);
+    }
+
+    function getDeposit() external view returns (uint256) {
+        return entryPoint.balanceOf(address(this));
+    }
+
+    function getStakeInfo()
+        external
+        view
+        returns (uint256 depositAmount, bool staked, uint112 stake, uint32 unstakeDelaySec, uint48 withdrawTime)
+    {
+        IStakeManager.DepositInfo memory info = entryPoint.getDepositInfo(address(this));
+        return (info.deposit, info.staked, info.stake, info.unstakeDelaySec, info.withdrawTime);
     }
 }

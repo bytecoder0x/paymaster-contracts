@@ -1,4 +1,4 @@
-import { Signature } from "ethers";
+import { Signature, keccak256 } from "ethers";
 import { TokenPaymaster } from "../../typechain-types";
 import { getCurrentTimestamp } from ".";
 import { SIGNATURE_VALIDITY } from "../constants";
@@ -8,19 +8,29 @@ import { PaymasterPaymentDataStruct } from "../types";
 export async function getPaymentSignature(
   paymasterContract: TokenPaymaster,
   paymentStruct: PaymasterPaymentDataStruct,
+  userOpCallData: string,  // Full userOp.callData to be signed
+  user: string       // user address (from userOp.sender)
 ) {
-  const { token, tokenPriceWei, user, operator } = paymentStruct;
-  const [nonce, currentTimestamp, verifyingContract] = await Promise.all([
-    paymasterContract.operatorUserNonces(operator, user),
+  const { token, tokenPriceWei, operator } = paymentStruct;
+  
+  // Get current nonce for operator-user pair
+  const operatorAddress = typeof operator === 'string' ? operator : operator.address;
+  const [currentNonce, currentTimestamp, verifyingContract] = await Promise.all([
+    paymasterContract.operatorUserNonces(operatorAddress, user),
     getCurrentTimestamp(),
     paymasterContract.getAddress(),
   ]);
-  const deadline = currentTimestamp + SIGNATURE_VALIDITY;
+  
+  // Use provided deadline if available, otherwise use default
+  const deadline = paymentStruct.deadline || (currentTimestamp + SIGNATURE_VALIDITY);
+
+  // Hash the userOp.callData that will be allowed
+  const callDataHash = keccak256(userOpCallData);
 
   const domain = {
     name: "TokenPaymaster",
     version: "1",
-    chainId: network.config.chainId,
+    chainId: network.config.chainId || 31337,
     verifyingContract,
   };
 
@@ -29,6 +39,7 @@ export async function getPaymentSignature(
       { name: "token", type: "address" },
       { name: "tokenPriceWei", type: "uint256" },
       { name: "user", type: "address" },
+      { name: "callDataHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
       { name: "deadline", type: "uint256" },
     ],
@@ -38,12 +49,13 @@ export async function getPaymentSignature(
     token: token.target.toString(),
     tokenPriceWei,
     user,
-    nonce,
+    callDataHash,
+    nonce: currentNonce,
     deadline,
   };
 
-  const signature = await operator.signTypedData(domain, types, value);
-  const { v, r, s } = Signature.from(signature);
-
-  return { nonce, deadline, v, r, s };
+  const signatureString = await operator.signTypedData(domain, types, value);
+  const { v, r, s } = Signature.from(signatureString);
+  
+  return { nonce: currentNonce, deadline, v, r, s };
 }

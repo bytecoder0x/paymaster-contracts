@@ -2,7 +2,7 @@ import { AbiCoder, BytesLike, getBytes, HDNodeWallet, solidityPacked } from "eth
 import { IPaymaster, SimpleAccount } from "../../typechain-types";
 import { PackedUserOperationStruct } from "../../typechain-types/contracts/TokenPaymaster";
 import { FeePerGas, GasLimits, PaymasterPaymentDataStructSigned, Uint256 } from "../types";
-import { IEntryPoint } from "../../typechain-types/contracts/test/IEntryPoint.sol";
+import { IEntryPoint } from "../../typechain-types";
 
 export async function getUserOp(
   entryPoint: IEntryPoint,
@@ -55,21 +55,20 @@ function encodePaymasterAndData(
   paymasterVerificationGas: Uint256,
   paymasterPostOpGas: Uint256,
 ): string {
-  const { token, tokenPriceWei, user, operator, nonce, deadline, v, r, s } = data;
+  const { token, tokenPriceWei, nonce, deadline, v, r, s } = data;
 
+  // Temporarily use original uint256 encoding to debug signature issue
   const encodedStruct = AbiCoder.defaultAbiCoder().encode(
     [
       "address", // token
-      "uint256", // tokenPriceWei
-      "address", // user
-      "address", // operator
-      "uint256", // nonce
-      "uint256", // deadline
-      "uint8", // v
+      "uint256", // tokenPriceWei (back to uint256 for debugging)
+      "uint256", // nonce (back to uint256 for debugging)
+      "uint256", // deadline (back to uint256 for debugging)
+      "uint8",   // v
       "bytes32", // r
       "bytes32", // s
     ],
-    [token.target.toString(), tokenPriceWei, user, operator.address, nonce, deadline, v, r, s],
+    [token.target.toString(), tokenPriceWei, nonce, deadline, v, r, s],
   );
 
   return solidityPacked(

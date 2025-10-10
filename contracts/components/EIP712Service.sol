@@ -7,86 +7,57 @@ import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions
 import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
 
 import {PaymasterPaymentData} from "../interfaces/ITokenPaymaster.sol";
-import {ZeroAddress, ZeroUint256, InvalidSender} from "../errors/PaymasterErrors.sol";
+import {ValidationModifiers} from "./ValidationModifiers.sol";
 
-abstract contract EIP712Service is AccessControlEnumerable, EIP712 {
-    /// @dev Mapping to track signature nonces, operator's address => caller's address => signature nonce
+abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable, EIP712 {
+    /// @dev Mapping: operator => user => nonce (for replay protection)
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
-    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,uint256 nonce,uint256 deadline)")
+    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,bytes32 callDataHash,uint256 nonce,uint256 deadline)")
     bytes32 public constant PAYMASTER_PAYMENT_TYPEHASH =
-        0x6c33974f8489bf4058fecaa4b08ea366ab68862d25c8b24bf8f6d55d0d129248;
+        0x39a28d7a0e7d79abb107bbcaebdf123fbdcf7d3fd6562d234d759c004a60d57d;
 
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
 
-    constructor(address operator) EIP712("TokenPaymaster", "1") {
+    constructor(address operator) nonZeroAddress(operator) EIP712("TokenPaymaster", "1") {
         _grantRole(OPERATOR_ROLE, operator);
-    }
-
-    /**
-     * @notice Computes the EIP-712 compliant hash for the given struct data.
-     * @dev This function uses the `_hashTypedDataV4` function from the parent contract to generate the hash.
-     * It is used for EIP-712 signature validation.
-     * @param structHash The hash of the struct data to be typed.
-     * @return The EIP-712 compliant hash of the given struct data.
-     */
-    function hashTypedDataV4(bytes32 structHash) external view returns (bytes32) {
-        return super._hashTypedDataV4(structHash);
     }
 
     function _validatePaymentSignature(
         address from,
-        PaymasterPaymentData memory param
-    ) internal returns (uint256 validationData) {
-        if (param.token == address(0) || param.user == address(0)) revert ZeroAddress();
-        if (param.tokenPriceWei == 0) revert ZeroUint256();
-        if (param.user != from) revert InvalidSender(param.user, from);
+        PaymasterPaymentData memory param,
+        bytes calldata callData
+    ) internal nonZeroAddress(param.token) nonZeroUint256(param.tokenPriceWei) returns (uint256 validationData) {
+        // Check signature deadline
+        if (param.deadline < block.timestamp) {
+            return SIG_VALIDATION_FAILED;
+        }
 
+        // Create callDataHash for validation
+        bytes32 callDataHash = keccak256(callData);
+
+        // Encode data that was signed by operator
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
             param.tokenPriceWei,
-            param.user,
-            param.nonce,
+            from, // user address (from userOp.sender)
+            callDataHash, // callData hash (computed from userOp.callData)
+            param.nonce, // nonce for replay protection
             param.deadline
         );
-        validationData = _verifySignature(
-            encodedData,
-            from,
-            param.operator,
-            param.nonce,
-            param.deadline,
-            param.v,
-            param.r,
-            param.s
-        );
-    }
-
-    function _verifySignature(
-        bytes memory encodedData,
-        address from,
-        address operator,
-        uint256 nonce,
-        uint256 deadline,
-        uint8 v,
-        bytes32 r,
-        bytes32 s
-    ) private returns (uint256 validationData) {
-        // Check if operator is valid and signature is within the allowed timeframe
-        if (operator == address(0) || deadline < block.timestamp) {
-            return SIG_VALIDATION_FAILED;
-        }
-        // Verify nonce
-        if (nonce != _useNonce(operator, from)) {
-            return SIG_VALIDATION_FAILED;
-        }
 
         bytes32 digest = _hashTypedDataV4(keccak256(encodedData));
-        (address recovered, , ) = ECDSA.tryRecover(digest, v, r, s);
+        (address recovered, , ) = ECDSA.tryRecover(digest, param.v, param.r, param.s);
 
-        // Check the recovered address is valid and authorized
-        if (recovered == address(0) || recovered != operator || !hasRole(OPERATOR_ROLE, recovered)) {
+        // Check the recovered address has operator role
+        if (recovered == address(0) || !hasRole(OPERATOR_ROLE, recovered)) {
+            return SIG_VALIDATION_FAILED;
+        }
+
+        // Validate nonce to prevent replay attacks (using recovered operator address)
+        if (param.nonce != _useNonce(recovered, from)) {
             return SIG_VALIDATION_FAILED;
         }
 
