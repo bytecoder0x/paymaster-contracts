@@ -32,7 +32,7 @@
     "coverage": "hardhat coverage",
     "docs": "hardhat docgen",
     "compile": "hardhat compile",
-    "deploy": "hardhat ignition deploy ignition/modules/Lock.ts",
+    "deploy": "hardhat ignition deploy ignition/modules/TokenPaymaster.ts",
     "clear-state": "hardhat ignition wipe",
     "test": "hardhat test",
     "run-script": "hardhat run"
