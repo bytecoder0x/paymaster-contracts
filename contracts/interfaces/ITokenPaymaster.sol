@@ -26,9 +26,5 @@ interface ITokenPaymaster is IPaymaster {
         uint256 tokenPrice
     );
 
-    event TokensWithdrawn(
-        address indexed recipient,
-        address[] tokens,
-        uint256[] amounts
-    );
+    event TokensWithdrawn(address indexed recipient, address[] tokens, uint256[] amounts);
 }

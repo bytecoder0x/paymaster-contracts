@@ -6,6 +6,7 @@ import {PackedUserOperation} from "@account-abstraction/contracts/interfaces/IPa
 import {UserOperationLib} from "@account-abstraction/contracts/core/UserOperationLib.sol";
 import {SIG_VALIDATION_FAILED, SIG_VALIDATION_SUCCESS} from "@account-abstraction/contracts/core/Helpers.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import {IPaymaster} from "@account-abstraction/contracts/interfaces/IPaymaster.sol";
 
 import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaster.sol";
 import {StakeManager} from "./components/StakeManager.sol";
@@ -43,6 +44,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         _unpause();
     }
 
+    /// @inheritdoc IPaymaster
     function validatePaymasterUserOp(
         PackedUserOperation calldata userOp,
         bytes32 userOpHash,
@@ -70,6 +72,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
     }
 
+    /// @inheritdoc IPaymaster
     function postOp(
         PostOpMode mode,
         bytes calldata context,
@@ -117,7 +120,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         uint256[] memory amounts = new uint256[](1);
         tokens[0] = token;
         amounts[0] = amount;
-        
+
         _withdrawTokensBatch(tokens, amounts, recipient);
     }
 
@@ -126,7 +129,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
      * @param tokens Array of ERC20 tokens to withdraw
      * @param amounts Array of amounts to withdraw (use type(uint256).max for full balance)
      * @param recipient Address to receive the tokens
-     * 
+     *
      * @dev Example usage:
      * ```solidity
      * IERC20[] memory tokens = new IERC20[](2);
@@ -135,7 +138,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
      * tokens[1] = IERC20(usdtAddress);
      * amounts[0] = 1000e6; // 1000 USDC
      * amounts[1] = type(uint256).max; // All USDT balance
-     * 
+     *
      * paymaster.withdrawTokensBatch(tokens, amounts, treasuryAddress);
      * ```
      */
@@ -149,7 +152,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
 
     /**
      * @notice Internal function to handle batch token withdrawals
-     * @param tokens Array of ERC20 tokens to withdraw  
+     * @param tokens Array of ERC20 tokens to withdraw
      * @param amounts Array of amounts to withdraw
      * @param recipient Address to receive the tokens
      */
@@ -159,33 +162,33 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         address recipient
     ) private nonZeroUint256(tokens.length) {
         if (tokens.length != amounts.length) revert ArrayLengthMismatch(tokens.length, amounts.length);
-        
+
         // Arrays to store actual withdrawn data for event
         address[] memory withdrawnTokens = new address[](tokens.length);
         uint256[] memory withdrawnAmounts = new uint256[](tokens.length);
-        
+
         for (uint256 i = 0; i < tokens.length; ++i) {
             IERC20 token = tokens[i];
             uint256 amount = amounts[i];
-            
+
             // Validate token address is not zero
             if (address(token) == address(0)) revert ZeroAddress();
-            
+
             // Handle max amount case
             if (amount == type(uint256).max) {
                 amount = token.balanceOf(address(this));
             }
-            
+
             // Store data for event
             withdrawnTokens[i] = address(token);
             withdrawnAmounts[i] = amount;
-            
+
             // Only transfer if amount > 0
             if (amount > 0) {
                 token.safeTransfer(recipient, amount);
             }
         }
-        
+
         emit TokensWithdrawn(recipient, withdrawnTokens, withdrawnAmounts);
     }
 
