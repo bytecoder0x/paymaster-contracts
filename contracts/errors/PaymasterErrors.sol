@@ -7,3 +7,4 @@ error ZeroAddress();
 error ZeroUint256();
 error InvalidPostOpContextLength(uint256 postOpContextLength);
 error InsufficientTokenAmount();
+error ArrayLengthMismatch(uint256 tokensLength, uint256 amountsLength);

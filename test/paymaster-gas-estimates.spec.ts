@@ -9,10 +9,10 @@ import {
   SimpleAccount__factory,
   TokenPaymaster,
   TestCounter,
+  IEntryPoint__factory,
 } from "../typechain-types";
 import { getPaymentSignature, getUserOp } from "./utils";
 import { EventLog, HDNodeWallet, MaxUint256, parseUnits, Wallet } from "ethers";
-import { IEntryPoint__factory } from "../typechain-types/factories/contracts/test/IEntryPoint.sol";
 import { FEES, GAS } from "./constants";
 
 describe("Gas estimates", () => {

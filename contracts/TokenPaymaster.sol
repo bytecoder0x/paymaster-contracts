@@ -11,7 +11,7 @@ import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaste
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {ValidationModifiers} from "./components/ValidationModifiers.sol";
-import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength} from "./errors/PaymasterErrors.sol";
+import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
 
 contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, Pausable {
     using SafeERC20 for IERC20;
@@ -64,10 +64,10 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
 
         if (tokenAmount == 0) revert InsufficientTokenAmount();
 
-        IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
-
         context = abi.encodePacked(token, tokenAmount, tokenPriceWei, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
+
+        IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
     }
 
     function postOp(
@@ -113,8 +113,80 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         address recipient,
         uint256 amount
     ) external nonZeroAddress(recipient) nonZeroUint256(amount) onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (amount == type(uint256).max) amount = token.balanceOf(address(this));
-        token.safeTransfer(recipient, amount);
+        IERC20[] memory tokens = new IERC20[](1);
+        uint256[] memory amounts = new uint256[](1);
+        tokens[0] = token;
+        amounts[0] = amount;
+        
+        _withdrawTokensBatch(tokens, amounts, recipient);
+    }
+
+    /**
+     * @notice Batch withdraw multiple tokens to recipient
+     * @param tokens Array of ERC20 tokens to withdraw
+     * @param amounts Array of amounts to withdraw (use type(uint256).max for full balance)
+     * @param recipient Address to receive the tokens
+     * 
+     * @dev Example usage:
+     * ```solidity
+     * IERC20[] memory tokens = new IERC20[](2);
+     * uint256[] memory amounts = new uint256[](2);
+     * tokens[0] = IERC20(usdcAddress);
+     * tokens[1] = IERC20(usdtAddress);
+     * amounts[0] = 1000e6; // 1000 USDC
+     * amounts[1] = type(uint256).max; // All USDT balance
+     * 
+     * paymaster.withdrawTokensBatch(tokens, amounts, treasuryAddress);
+     * ```
+     */
+    function withdrawTokensBatch(
+        IERC20[] calldata tokens,
+        uint256[] calldata amounts,
+        address recipient
+    ) external nonZeroAddress(recipient) onlyRole(DEFAULT_ADMIN_ROLE) {
+        _withdrawTokensBatch(tokens, amounts, recipient);
+    }
+
+    /**
+     * @notice Internal function to handle batch token withdrawals
+     * @param tokens Array of ERC20 tokens to withdraw  
+     * @param amounts Array of amounts to withdraw
+     * @param recipient Address to receive the tokens
+     */
+    function _withdrawTokensBatch(
+        IERC20[] memory tokens,
+        uint256[] memory amounts,
+        address recipient
+    ) private nonZeroUint256(tokens.length) {
+        if (tokens.length != amounts.length) revert ArrayLengthMismatch(tokens.length, amounts.length);
+        
+        // Arrays to store actual withdrawn data for event
+        address[] memory withdrawnTokens = new address[](tokens.length);
+        uint256[] memory withdrawnAmounts = new uint256[](tokens.length);
+        
+        for (uint256 i = 0; i < tokens.length; ++i) {
+            IERC20 token = tokens[i];
+            uint256 amount = amounts[i];
+            
+            // Validate token address is not zero
+            if (address(token) == address(0)) revert ZeroAddress();
+            
+            // Handle max amount case
+            if (amount == type(uint256).max) {
+                amount = token.balanceOf(address(this));
+            }
+            
+            // Store data for event
+            withdrawnTokens[i] = address(token);
+            withdrawnAmounts[i] = amount;
+            
+            // Only transfer if amount > 0
+            if (amount > 0) {
+                token.safeTransfer(recipient, amount);
+            }
+        }
+        
+        emit TokensWithdrawn(recipient, withdrawnTokens, withdrawnAmounts);
     }
 
     /**
@@ -161,6 +233,8 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         validationData = _validatePaymentSignature(userOp.sender, paymentData, userOp.callData);
 
         token = paymentData.token;
+        // Validate token address is not zero
+        if (token == address(0)) revert ZeroAddress();
         tokenPriceWei = paymentData.tokenPriceWei;
     }
 }
