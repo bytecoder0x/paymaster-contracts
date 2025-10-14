@@ -12,7 +12,7 @@ import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaste
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {ValidationModifiers} from "./components/ValidationModifiers.sol";
-import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
+import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
 
 contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, Pausable {
     using SafeERC20 for IERC20;
@@ -64,12 +64,12 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             tokenAmount = ((maxCost + postOpCost * maxFeePerGas) * tokenPriceWei) / TOKEN_PRICE_DENOMINATOR;
         }
 
-        if (tokenAmount == 0) revert InsufficientTokenAmount();
-
         context = abi.encodePacked(token, tokenAmount, tokenPriceWei, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
 
-        IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
+        if (tokenAmount > 0) {
+            IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
+        }
     }
 
     /// @inheritdoc IPaymaster
