@@ -226,9 +226,6 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             (PaymasterPaymentData)
         );
 
-        // Validate token address is not zero
-        if (paymentData.token == address(0)) revert ZeroAddress();
-
         validationData = _validatePaymentSignature(userOp.sender, paymentData, userOp.callData);
 
         token = paymentData.token;
