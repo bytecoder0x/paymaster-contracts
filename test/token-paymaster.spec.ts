@@ -275,56 +275,6 @@ describe("TokenPaymaster", () => {
         );
     });
 
-    it("should revert if calculated prefund is too low", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
-
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei: 1,
-        operator,
-      };
-      // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      const tx = entryPoint.handleOps([userOp], beneficiary);
-      await expect(tx)
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
-        .withArgs(
-          0,
-          "AA33 reverted",
-          paymaster.interface.encodeErrorResult("InsufficientTokenAmount"),
-        );
-
-      // try {
-      //   await entryPoint.handleOps([userOp], beneficiary);
-      // } catch (err: any) {
-      //   console.log(entryPoint.interface.decodeErrorResult("FailedOpWithRevert", err.data));
-      // }
-    });
-
     it("should revert if out of gas", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
 
@@ -354,7 +304,7 @@ describe("TokenPaymaster", () => {
       const feesPerGas = new FeePerGas();
       feesPerGas.maxFeePerGas = 2e10;
       feesPerGas.maxPriorityFeePerGas = 1e9;
-      gasLimits.paymasterVerification = 74_000;
+      gasLimits.paymasterVerification = 64_000;
       gasLimits.paymasterPostOp = 12_000;
 
       const userOp = await getUserOp(
@@ -373,6 +323,12 @@ describe("TokenPaymaster", () => {
       await expect(tx)
         .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", "0x");
+
+      // try {
+      //   await entryPoint.handleOps([userOp], beneficiary);
+      // } catch (err: any) {
+      //   console.log(entryPoint.interface.decodeErrorResult("FailedOpWithRevert", err.data));
+      // }
     });
 
     it("should prefund with ERC20 tokens", async () => {
@@ -1154,7 +1110,11 @@ describe("TokenPaymaster", () => {
       const initialBalance = await usdc.balanceOf(deployer.address);
 
       // Withdraw with max amount
-      const tx = await paymaster.withdrawTokens(usdc.target.toString(), deployer.address, MaxUint256);
+      const tx = await paymaster.withdrawTokens(
+        usdc.target.toString(),
+        deployer.address,
+        MaxUint256,
+      );
 
       const finalBalance = await usdc.balanceOf(deployer.address);
       expect(finalBalance - initialBalance).to.equal(transferAmount);
@@ -1162,11 +1122,7 @@ describe("TokenPaymaster", () => {
       // Check TokensWithdrawn event (single token wrapped in array)
       await expect(tx)
         .to.emit(paymaster, "TokensWithdrawn")
-        .withArgs(
-          deployer.address,
-          [usdc.target.toString()],
-          [transferAmount]
-        );
+        .withArgs(deployer.address, [usdc.target.toString()], [transferAmount]);
     });
 
     it("should withdraw batch tokens successfully", async () => {
@@ -1174,7 +1130,7 @@ describe("TokenPaymaster", () => {
 
       // Deploy second mock token
       const usdt = await ethers.deployContract("MockERC20");
-      
+
       // Transfer tokens to paymaster
       const transferAmount1 = parseUnits("1000", 6);
       const transferAmount2 = parseUnits("500", 6);
@@ -1188,12 +1144,12 @@ describe("TokenPaymaster", () => {
       const tx = await paymaster.withdrawTokensBatch(
         [usdc.target.toString(), usdt.target.toString()],
         [parseUnits("500", 6), MaxUint256],
-        deployer.address
+        deployer.address,
       );
 
       const finalBalance1 = await usdc.balanceOf(deployer.address);
       const finalBalance2 = await usdt.balanceOf(deployer.address);
-      
+
       expect(finalBalance1 - initialBalance1).to.equal(parseUnits("500", 6));
       expect(finalBalance2 - initialBalance2).to.equal(transferAmount2);
 
@@ -1203,7 +1159,7 @@ describe("TokenPaymaster", () => {
         .withArgs(
           deployer.address,
           [usdc.target.toString(), usdt.target.toString()],
-          [parseUnits("500", 6), transferAmount2]
+          [parseUnits("500", 6), transferAmount2],
         );
     });
 
@@ -1214,8 +1170,8 @@ describe("TokenPaymaster", () => {
         paymaster.withdrawTokensBatch(
           [usdc.target.toString()],
           [parseUnits("100", 6), parseUnits("200", 6)], // Different length
-          deployer.address
-        )
+          deployer.address,
+        ),
       ).to.be.revertedWithCustomError(paymaster, "ArrayLengthMismatch");
     });
 
@@ -1223,7 +1179,7 @@ describe("TokenPaymaster", () => {
       const { paymaster } = await loadFixture(setup);
 
       await expect(
-        paymaster.withdrawTokensBatch([], [], deployer.address)
+        paymaster.withdrawTokensBatch([], [], deployer.address),
       ).to.be.revertedWithCustomError(paymaster, "ZeroUint256");
     });
 
@@ -1234,8 +1190,8 @@ describe("TokenPaymaster", () => {
         paymaster.withdrawTokensBatch(
           ["0x0000000000000000000000000000000000000000"],
           [parseUnits("100", 6)],
-          deployer.address
-        )
+          deployer.address,
+        ),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
@@ -1246,8 +1202,8 @@ describe("TokenPaymaster", () => {
         paymaster.withdrawTokens(
           "0x0000000000000000000000000000000000000000",
           deployer.address,
-          parseUnits("100", 6)
-        )
+          parseUnits("100", 6),
+        ),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 

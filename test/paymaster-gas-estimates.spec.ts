@@ -14,6 +14,7 @@ import {
 import { getPaymentSignature, getUserOp } from "./utils";
 import { EventLog, HDNodeWallet, MaxUint256, parseUnits, Wallet } from "ethers";
 import { FEES, GAS } from "./constants";
+import { expect } from "chai";
 
 describe("Gas estimates", () => {
   let owner: HardhatEthersSigner;
@@ -109,7 +110,7 @@ describe("Gas estimates", () => {
       maxCost,
     );
     await paymaster.validatePaymasterUserOp(userOp, userOpHash, maxCost);
-    console.log("Estimate ValidatePaymasterUserOp:", estimatedGasValidatePaymasterUserOp);
+    expect(estimatedGasValidatePaymasterUserOp).to.be.lt(110000n);
   });
 
   it("Estimate postOp", async () => {
@@ -124,6 +125,6 @@ describe("Gas estimates", () => {
       actualGasCost,
       actualUserOpFeePerGas,
     );
-    console.log("Estimate postOp:", estimatedGasPostOp);
+    expect(estimatedGasPostOp).to.be.lt(67000n);
   });
 });

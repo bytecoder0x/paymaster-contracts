@@ -12,17 +12,25 @@ import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaste
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {ValidationModifiers} from "./components/ValidationModifiers.sol";
-import {InsufficientTokenAmount, InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
+import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
 
 contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, Pausable {
     using SafeERC20 for IERC20;
 
+    /// @notice Fixed gas cost used during postOp to compute total token charge.
     uint256 public immutable postOpCost;
 
     uint256 private constant CONTEXT_LENGTH = 136;
     uint256 private constant PAYMASTER_DATA_LENGTH = 276; // 52 + 224 bytes (paymaster address + gas limits + PaymasterPaymentData)
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
 
+    /**
+     * @notice Initializes the TokenPaymaster with the admin, operator, EntryPoint, and post-operation gas cost.
+     * @param owner The address granted DEFAULT_ADMIN_ROLE.
+     * @param operator The address granted OPERATOR_ROLE for signing paymaster authorizations.
+     * @param entryPoint_ The ERC-4337 EntryPoint contract address.
+     * @param postOpCost_ The fixed gas cost added during post-operation token cost calculations.
+     */
     constructor(
         address owner,
         address operator,
@@ -34,12 +42,19 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     }
 
     /**
-     * @notice Emergency pause function - only admin can pause/unpause
+     * @notice Pauses all paymaster operations.
+     * @dev Can only be called by an account with the DEFAULT_ADMIN_ROLE.
+     *      When paused, the contract rejects UserOperations and postOp execution.
      */
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _pause();
     }
 
+    /**
+     * @notice Resumes paymaster operations after a pause.
+     * @dev Can only be called by an account with the DEFAULT_ADMIN_ROLE.
+     *      Enables UserOperation validation and postOp logic to proceed normally.
+     */
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
     }
@@ -64,12 +79,12 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             tokenAmount = ((maxCost + postOpCost * maxFeePerGas) * tokenPriceWei) / TOKEN_PRICE_DENOMINATOR;
         }
 
-        if (tokenAmount == 0) revert InsufficientTokenAmount();
+        if (tokenAmount > 0) {
+            IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
+        }
 
         context = abi.encodePacked(token, tokenAmount, tokenPriceWei, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
-
-        IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
     }
 
     /// @inheritdoc IPaymaster
@@ -111,6 +126,11 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
     }
 
+    /**
+     * @notice Withdraws a specified amount of a single ERC-20 token from the paymaster to a recipient.
+     * @param recipient The address that will receive the withdrawn tokens.
+     * @param amount The amount of tokens to withdraw, or `type(uint256).max` to withdraw the full balance.
+     */
     function withdrawTokens(
         IERC20 token,
         address recipient,
@@ -125,22 +145,10 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     }
 
     /**
-     * @notice Batch withdraw multiple tokens to recipient
-     * @param tokens Array of ERC20 tokens to withdraw
-     * @param amounts Array of amounts to withdraw (use type(uint256).max for full balance)
-     * @param recipient Address to receive the tokens
-     *
-     * @dev Example usage:
-     * ```solidity
-     * IERC20[] memory tokens = new IERC20[](2);
-     * uint256[] memory amounts = new uint256[](2);
-     * tokens[0] = IERC20(usdcAddress);
-     * tokens[1] = IERC20(usdtAddress);
-     * amounts[0] = 1000e6; // 1000 USDC
-     * amounts[1] = type(uint256).max; // All USDT balance
-     *
-     * paymaster.withdrawTokensBatch(tokens, amounts, treasuryAddress);
-     * ```
+     * @notice Batch withdraw multiple tokens to recipient.
+     * @param tokens Array of ERC20 tokens to withdraw.
+     * @param amounts Array of amounts to withdraw (use type(uint256).max for full balance).
+     * @param recipient Address to receive the tokens.
      */
     function withdrawTokensBatch(
         IERC20[] calldata tokens,
@@ -150,12 +158,6 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         _withdrawTokensBatch(tokens, amounts, recipient);
     }
 
-    /**
-     * @notice Internal function to handle batch token withdrawals
-     * @param tokens Array of ERC20 tokens to withdraw
-     * @param amounts Array of amounts to withdraw
-     * @param recipient Address to receive the tokens
-     */
     function _withdrawTokensBatch(
         IERC20[] memory tokens,
         uint256[] memory amounts,
@@ -192,15 +194,6 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         emit TokensWithdrawn(recipient, withdrawnTokens, withdrawnAmounts);
     }
 
-    /**
-     * @notice Securely parses context data using assembly for gas efficiency
-     * @param context The context bytes to parse
-     * @return token The token address
-     * @return tokenAmount The token amount
-     * @return tokenPriceWei The token price in wei
-     * @return sender The sender address
-     * @return userOpHash The user operation hash
-     */
     function _parseContext(
         bytes calldata context
     )
@@ -233,11 +226,12 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             (PaymasterPaymentData)
         );
 
+        // Validate token address is not zero
+        if (paymentData.token == address(0)) revert ZeroAddress();
+
         validationData = _validatePaymentSignature(userOp.sender, paymentData, userOp.callData);
 
         token = paymentData.token;
-        // Validate token address is not zero
-        if (token == address(0)) revert ZeroAddress();
         tokenPriceWei = paymentData.tokenPriceWei;
     }
 }

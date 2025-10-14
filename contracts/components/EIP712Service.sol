@@ -10,7 +10,10 @@ import {PaymasterPaymentData} from "../interfaces/ITokenPaymaster.sol";
 import {ValidationModifiers} from "./ValidationModifiers.sol";
 
 abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable, EIP712 {
-    /// @dev Mapping: operator => user => nonce (for replay protection)
+    /**
+     * @notice Tracks used nonces per operator-user pair to prevent replay attacks.
+     * @dev Mapping: operator => user => nonce
+     */
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
     /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,bytes32 callDataHash,uint256 nonce,uint256 deadline)")
@@ -20,6 +23,10 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
 
+    /**
+     * @notice Initializes the EIP-712 domain and assigns the initial operator role.
+     * @param operator The address granted OPERATOR_ROLE to sign paymaster authorizations.
+     */
     constructor(address operator) nonZeroAddress(operator) EIP712("TokenPaymaster", "1") {
         _grantRole(OPERATOR_ROLE, operator);
     }

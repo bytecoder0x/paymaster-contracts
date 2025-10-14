@@ -26,6 +26,12 @@ yarn install
 yarn chain
 ```
 
+### Run tests
+
+```shell
+yarn test
+```
+
 ### Get test coverage
 
 ```shell
@@ -46,7 +52,7 @@ yarn compile
 
 ### Deploy contracts
 
-This repository uses Hardhat Ignition for contract deployment. To deploy staking contracts, run:
+This repository uses Hardhat Ignition for contract deployment. To deploy paymaster contracts, run:
 
 ```shell
 yarn deploy <network_name>
