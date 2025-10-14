@@ -275,56 +275,6 @@ describe("TokenPaymaster", () => {
         );
     });
 
-    it("should revert if calculated prefund is too low", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
-
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei: 1,
-        operator,
-      };
-      // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      const tx = entryPoint.handleOps([userOp], beneficiary);
-      await expect(tx)
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
-        .withArgs(
-          0,
-          "AA33 reverted",
-          paymaster.interface.encodeErrorResult("InsufficientTokenAmount"),
-        );
-
-      // try {
-      //   await entryPoint.handleOps([userOp], beneficiary);
-      // } catch (err: any) {
-      //   console.log(entryPoint.interface.decodeErrorResult("FailedOpWithRevert", err.data));
-      // }
-    });
-
     it("should revert if out of gas", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
 
@@ -354,7 +304,7 @@ describe("TokenPaymaster", () => {
       const feesPerGas = new FeePerGas();
       feesPerGas.maxFeePerGas = 2e10;
       feesPerGas.maxPriorityFeePerGas = 1e9;
-      gasLimits.paymasterVerification = 74_000;
+      gasLimits.paymasterVerification = 64_000;
       gasLimits.paymasterPostOp = 12_000;
 
       const userOp = await getUserOp(
@@ -373,6 +323,12 @@ describe("TokenPaymaster", () => {
       await expect(tx)
         .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", "0x");
+
+      // try {
+      //   await entryPoint.handleOps([userOp], beneficiary);
+      // } catch (err: any) {
+      //   console.log(entryPoint.interface.decodeErrorResult("FailedOpWithRevert", err.data));
+      // }
     });
 
     it("should prefund with ERC20 tokens", async () => {

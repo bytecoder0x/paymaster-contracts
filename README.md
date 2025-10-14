@@ -26,6 +26,12 @@ yarn install
 yarn chain
 ```
 
+### Run tests
+
+```shell
+yarn test
+```
+
 ### Get test coverage
 
 ```shell
@@ -59,8 +65,6 @@ For a fresh deployment or to reset previous executions, clear the previous state
 ```shell
 yarn clear-state <deployment_id> <module>#<contract_name>
 ```
-
-yarn clear-state chain-11155111 TokenPaymasterModule#TokenPaymaster
 
 The `deployment_id` is obtained as:
 
