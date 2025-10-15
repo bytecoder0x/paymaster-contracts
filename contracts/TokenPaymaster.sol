@@ -20,7 +20,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     /// @notice Fixed gas cost used during postOp to compute total token charge.
     uint256 public immutable postOpCost;
 
-    uint256 private constant CONTEXT_LENGTH = 136;
+    uint256 private constant CONTEXT_LENGTH = 104;
     uint256 private constant PAYMASTER_DATA_LENGTH = 276; // 52 + 224 bytes (paymaster address + gas limits + PaymasterPaymentData)
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
 
@@ -60,10 +60,12 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     }
 
     /// @inheritdoc IPaymaster
+    /// @dev Validates paymaster authorization without pre-charging tokens.
+    /// Token transfer happens in postOp after actual gas usage is known.
     function validatePaymasterUserOp(
         PackedUserOperation calldata userOp,
         bytes32 userOpHash,
-        uint256 maxCost
+        uint256 /* maxCost */
     ) external onlyEntryPoint whenNotPaused returns (bytes memory context, uint256 validationData) {
         address token;
         uint256 tokenPriceWei;
@@ -71,36 +73,26 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         (token, tokenPriceWei, validationData) = _validateAndDecodePaymasterAndData(userOp);
         if (validationData == SIG_VALIDATION_FAILED) return (bytes(""), SIG_VALIDATION_FAILED);
 
-        uint256 maxFeePerGas = UserOperationLib.unpackMaxFeePerGas(userOp);
-
-        // Gas optimization: Use unchecked arithmetic where overflow is impossible
-        uint256 tokenAmount;
-        unchecked {
-            tokenAmount = ((maxCost + postOpCost * maxFeePerGas) * tokenPriceWei) / TOKEN_PRICE_DENOMINATOR;
-        }
-
-        if (tokenAmount > 0) {
-            IERC20(token).safeTransferFrom(userOp.sender, address(this), tokenAmount);
-        }
-
-        context = abi.encodePacked(token, tokenAmount, tokenPriceWei, userOp.sender, userOpHash);
+        context = abi.encodePacked(token, tokenPriceWei, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
     }
 
     /// @inheritdoc IPaymaster
+    /// @dev Transfers exact token amount based on actual gas usage.
+    /// No pre-funding or refunds - user pays only what was actually consumed.
     function postOp(
-        PostOpMode mode,
+        PostOpMode /* mode */,
         bytes calldata context,
         uint256 actualGasCost,
         uint256 actualUserOpFeePerGas
     ) external onlyEntryPoint whenNotPaused {
         if (context.length != CONTEXT_LENGTH) revert InvalidPostOpContextLength(context.length);
 
-        (address token, uint256 tokenAmount, uint256 tokenPriceWei, address sender, bytes32 userOpHash) = _parseContext(
+        (address token, uint256 tokenPriceWei, address sender, bytes32 userOpHash) = _parseContext(
             context
         );
 
-        // Gas optimization: Calculate actual token needed with unchecked arithmetic
+        // Calculate exact token amount needed based on actual gas consumption
         uint256 actualTokenNeeded;
         unchecked {
             actualTokenNeeded =
@@ -108,20 +100,9 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
                 TOKEN_PRICE_DENOMINATOR;
         }
 
-        // Cap actual token needed to pre-authorized amount
-        if (actualTokenNeeded > tokenAmount) {
-            actualTokenNeeded = tokenAmount;
-        }
-
-        // Refund excess tokens to user if operation succeeded and refund is significant (>10%)
-        // If operation failed, we keep the pre-charged amount as penalty to prevent griefing attacks
-        if (mode == PostOpMode.opSucceeded && tokenAmount > actualTokenNeeded) {
-            uint256 refundAmount = tokenAmount - actualTokenNeeded;
-            // Only refund if the excess is more than 10% of actual cost to avoid micro-transactions
-            if (refundAmount > (actualTokenNeeded * 10) / 100) {
-                IERC20(token).safeTransfer(sender, refundAmount);
-            }
-        }
+        // Transfer exact token amount from user to paymaster
+        // User must have sufficient allowance or include approve in userOp calldata
+        IERC20(token).safeTransferFrom(sender, address(this), actualTokenNeeded);
 
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
     }
@@ -199,16 +180,15 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     )
         private
         pure
-        returns (address token, uint256 tokenAmount, uint256 tokenPriceWei, address sender, bytes32 userOpHash)
+        returns (address token, uint256 tokenPriceWei, address sender, bytes32 userOpHash)
     {
         assembly {
             // Load data directly from calldata using assembly for gas efficiency
             // shr(96, ...) shifts right by 96 bits to extract address (160 bits) from 256-bit word
             token := shr(96, calldataload(add(context.offset, 0))) // bytes 0-19: address (20 bytes)
-            tokenAmount := calldataload(add(context.offset, 20)) // bytes 20-51: uint256 (32 bytes)
-            tokenPriceWei := calldataload(add(context.offset, 52)) // bytes 52-83: uint256 (32 bytes)
-            sender := shr(96, calldataload(add(context.offset, 84))) // bytes 84-103: address (20 bytes)
-            userOpHash := calldataload(add(context.offset, 104)) // bytes 104-135: bytes32 (32 bytes)
+            tokenPriceWei := calldataload(add(context.offset, 20)) // bytes 20-51: uint256 (32 bytes)
+            sender := shr(96, calldataload(add(context.offset, 52))) // bytes 52-71: address (20 bytes)
+            userOpHash := calldataload(add(context.offset, 72)) // bytes 72-103: bytes32 (32 bytes)
         }
     }
 

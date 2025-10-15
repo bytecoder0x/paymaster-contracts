@@ -25,8 +25,8 @@ const eoa7702 = privateKeyToAccount(privateKey as Address);
 const chain = mainnet;
 
 const rpcUrl = `https://eth-mainnet.g.alchemy.com/v2/${process.env.ALCHEMY_API_KEY}`;
-const pimlicoUrl = `https://api.pimlico.io/v2/${chain.id}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
-const customPaymasterUrl = `http://127.0.0.1:3000/paymaster/rpc?apikey=${process.env.PAYMASTER_API_KEY}`;
+const bundlerUrl = `https://api.pimlico.io/v2/${chain.id}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+const customPaymasterUrl = `https://paymaster.example.com/paymaster/rpc?apikey=${process.env.PAYMASTER_API_KEY}`;
 
 const client = createPublicClient({
   chain,
@@ -35,7 +35,7 @@ const client = createPublicClient({
 
 const bundlerClient = createBundlerClient({
   client,
-  transport: http(pimlicoUrl),
+  transport: http(bundlerUrl),
 });
 
 const paymasterClient = createPaymasterClient({
@@ -46,10 +46,10 @@ const paymasterClient = createPaymasterClient({
 //   transport: http(pimlicoUrl),
 // });
 
-const pimlicoClient = createPimlicoClient({
-  transport: http(pimlicoUrl),
-  chain,
-});
+// const pimlicoClient = createPimlicoClient({
+//   transport: http(pimlicoUrl),
+//   chain,
+// });
 
 const entryPointAddress = "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108" as Address;
 const paymasterAddress = "0x0000000000000000000000000000000000000000" as Address;
