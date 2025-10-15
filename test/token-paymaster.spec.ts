@@ -174,17 +174,17 @@ describe("TokenPaymaster", () => {
 
       const tx = await entryPoint.handleOps([userOp], beneficiary);
       const receipt = await tx.wait();
-      
+
       // Check that PostOpRevertReason event was emitted due to insufficient allowance
       const revertLog = receipt?.logs.find(
         log => log.topics[0] === entryPoint.interface.getEvent("PostOpRevertReason").topicHash,
       );
-      
+
       expect(revertLog).to.not.be.undefined;
       const errorData = (revertLog as EventLog).args[3];
       const postOpErrorReason = entryPoint.interface.parseError(errorData)?.args[0];
       const parsed = usdc.interface.parseError(postOpErrorReason);
-      
+
       expect(parsed).to.not.be.null;
       expect(parsed?.name).to.equal("ERC20InsufficientAllowance");
     });
@@ -265,17 +265,17 @@ describe("TokenPaymaster", () => {
 
       const tx = await entryPoint.handleOps([userOp], beneficiary);
       const receipt = await tx.wait();
-      
+
       // Check that PostOpRevertReason event was emitted due to insufficient allowance
       const revertLog = receipt?.logs.find(
         log => log.topics[0] === entryPoint.interface.getEvent("PostOpRevertReason").topicHash,
       );
-      
+
       expect(revertLog).to.not.be.undefined;
       const errorData = (revertLog as EventLog).args[3];
       const postOpErrorReason = entryPoint.interface.parseError(errorData)?.args[0];
       const parsed = usdc.interface.parseError(postOpErrorReason);
-      
+
       expect(parsed).to.not.be.null;
       expect(parsed?.name).to.equal("ERC20InsufficientAllowance");
     });
@@ -624,14 +624,14 @@ describe("TokenPaymaster", () => {
       const revertLog = receipt?.logs.find(
         log => log.topics[0] === entryPoint.interface.getEvent("PostOpRevertReason").topicHash,
       );
-      
+
       // Ensure revertLog exists
       expect(revertLog).to.not.be.undefined;
-      
+
       const errorData = (revertLog as EventLog).args[3];
       const postOpErrorReason = entryPoint.interface.parseError(errorData)?.args[0];
       const parsed = usdc.interface.parseError(postOpErrorReason);
-      
+
       expect(parsed).to.not.be.null;
       expect(parsed?.name).to.equal("ERC20InsufficientAllowance");
       expect(parsed?.args[0]).to.equal(paymaster.target.toString());

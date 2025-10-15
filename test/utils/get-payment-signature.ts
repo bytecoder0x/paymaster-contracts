@@ -8,21 +8,21 @@ import { PaymasterPaymentDataStruct } from "../types";
 export async function getPaymentSignature(
   paymasterContract: TokenPaymaster,
   paymentStruct: PaymasterPaymentDataStruct,
-  userOpCallData: string,  // Full userOp.callData to be signed
-  user: string       // user address (from userOp.sender)
+  userOpCallData: string, // Full userOp.callData to be signed
+  user: string, // user address (from userOp.sender)
 ) {
   const { token, tokenPriceWei, operator } = paymentStruct;
-  
+
   // Get current nonce for operator-user pair
-  const operatorAddress = typeof operator === 'string' ? operator : operator.address;
+  const operatorAddress = typeof operator === "string" ? operator : operator.address;
   const [currentNonce, currentTimestamp, verifyingContract] = await Promise.all([
     paymasterContract.operatorUserNonces(operatorAddress, user),
     getCurrentTimestamp(),
     paymasterContract.getAddress(),
   ]);
-  
+
   // Use provided deadline if available, otherwise use default
-  const deadline = paymentStruct.deadline || (currentTimestamp + SIGNATURE_VALIDITY);
+  const deadline = paymentStruct.deadline || currentTimestamp + SIGNATURE_VALIDITY;
 
   // Hash the userOp.callData that will be allowed
   const callDataHash = keccak256(userOpCallData);
@@ -56,6 +56,6 @@ export async function getPaymentSignature(
 
   const signatureString = await operator.signTypedData(domain, types, value);
   const { v, r, s } = Signature.from(signatureString);
-  
+
   return { nonce: currentNonce, deadline, v, r, s };
 }
