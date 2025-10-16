@@ -6,7 +6,8 @@ import {IPaymaster} from "@account-abstraction/contracts/interfaces/IPaymaster.s
 /**
  * @notice Off-chain payment authorization used by the paymaster.
  * @param token ERC-20 token used to pay for gas.
- * @param tokenPriceWei The token exchange rate - how many tokens one full ETH (1e18 wei) is worth.
+ * @param exchangeRate The token exchange rate - how many tokens one full ETH (1e18 wei) is worth.
+ * @param postOpCost The gas limit for postOp.
  * @param nonce Operator nonce for replay protection.
  * @param deadline Expiration timestamp for the signature.
  * @param v ECDSA signature component.
@@ -15,7 +16,8 @@ import {IPaymaster} from "@account-abstraction/contracts/interfaces/IPaymaster.s
  */
 struct PaymasterPaymentData {
     address token;
-    uint256 tokenPriceWei;
+    uint256 exchangeRate;
+    uint256 postOpCost;
     uint256 nonce;
     uint256 deadline;
     uint8 v;
@@ -30,14 +32,14 @@ interface ITokenPaymaster is IPaymaster {
      * @param userOpHash Hash of the user operation.
      * @param token Token used for gas payment.
      * @param tokenAmount Actual amount of tokens charged.
-     * @param tokenPrice Token price used in calculation.
+     * @param exchangeRate Token exchange rate used in calculation.
      */
     event UserOperationSponsored(
         address indexed sender,
         bytes32 indexed userOpHash,
         address indexed token,
         uint256 tokenAmount,
-        uint256 tokenPrice
+        uint256 exchangeRate
     );
 
     /**

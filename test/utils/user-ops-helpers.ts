@@ -56,20 +56,21 @@ function encodePaymasterAndData(
   paymasterVerificationGas: Uint256,
   paymasterPostOpGas: Uint256,
 ): string {
-  const { token, tokenPriceWei, nonce, deadline, v, r, s } = data;
+  const { token, exchangeRate, postOpCost, nonce, deadline, v, r, s } = data;
 
   // Temporarily use original uint256 encoding to debug signature issue
   const encodedStruct = AbiCoder.defaultAbiCoder().encode(
     [
       "address", // token
-      "uint256", // tokenPriceWei (back to uint256 for debugging)
+      "uint256", // exchangeRate (back to uint256 for debugging)
+      "uint256", // postOpCost (back to uint256 for debugging)
       "uint256", // nonce (back to uint256 for debugging)
       "uint256", // deadline (back to uint256 for debugging)
       "uint8", // v
       "bytes32", // r
       "bytes32", // s
     ],
-    [token.target.toString(), tokenPriceWei, nonce, deadline, v, r, s],
+    [token.target.toString(), exchangeRate, postOpCost, nonce, deadline, v, r, s],
   );
 
   return solidityPacked(

@@ -11,11 +11,11 @@ export async function getPaymentSignature(
   userOpCallData: string, // Full userOp.callData to be signed
   user: string, // user address (from userOp.sender)
 ) {
-  const { token, tokenPriceWei, operator } = paymentStruct;
+  const { token, exchangeRate, postOpCost, operator } = paymentStruct;
 
   // Get current nonce for operator-user pair
   const operatorAddress = typeof operator === "string" ? operator : operator.address;
-  const [currentNonce, currentTimestamp, verifyingContract] = await Promise.all([
+  const [nonce, currentTimestamp, verifyingContract] = await Promise.all([
     paymasterContract.operatorUserNonces(operatorAddress, user),
     getCurrentTimestamp(),
     paymasterContract.getAddress(),
@@ -30,14 +30,15 @@ export async function getPaymentSignature(
   const domain = {
     name: "TokenPaymaster",
     version: "1",
-    chainId: network.config.chainId || 31337,
+    chainId: network.config.chainId,
     verifyingContract,
   };
 
   const types = {
     PaymasterPaymentData: [
       { name: "token", type: "address" },
-      { name: "tokenPriceWei", type: "uint256" },
+      { name: "exchangeRate", type: "uint256" },
+      { name: "postOpCost", type: "uint256" },
       { name: "user", type: "address" },
       { name: "callDataHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
@@ -47,15 +48,16 @@ export async function getPaymentSignature(
 
   const value = {
     token: token.target.toString(),
-    tokenPriceWei,
+    exchangeRate,
+    postOpCost,
     user,
     callDataHash,
-    nonce: currentNonce,
+    nonce,
     deadline,
   };
 
   const signatureString = await operator.signTypedData(domain, types, value);
   const { v, r, s } = Signature.from(signatureString);
 
-  return { nonce: currentNonce, deadline, v, r, s };
+  return { nonce, deadline, v, r, s };
 }

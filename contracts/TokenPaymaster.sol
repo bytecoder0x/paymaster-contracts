@@ -17,27 +17,21 @@ import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMi
 contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, Pausable {
     using SafeERC20 for IERC20;
 
-    /// @notice Fixed gas cost used during postOp to compute total token charge.
-    uint256 public immutable postOpCost;
-
-    uint256 private constant CONTEXT_LENGTH = 104;
-    uint256 private constant PAYMASTER_DATA_LENGTH = 276; // 52 + 224 bytes (paymaster address + gas limits + PaymasterPaymentData)
+    uint256 private constant CONTEXT_LENGTH = 136;
+    uint256 private constant PAYMASTER_DATA_LENGTH = 308; // 20 + 32 + 256 bytes (paymaster address + gas limits + PaymasterPaymentData)
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
 
     /**
-     * @notice Initializes the TokenPaymaster with the admin, operator, EntryPoint, and post-operation gas cost.
+     * @notice Initializes the TokenPaymaster with the admin, operator, EntryPoint.
      * @param owner The address granted DEFAULT_ADMIN_ROLE.
      * @param operator The address granted OPERATOR_ROLE for signing paymaster authorizations.
      * @param entryPoint_ The ERC-4337 EntryPoint contract address.
-     * @param postOpCost_ The fixed gas cost added during post-operation token cost calculations.
      */
     constructor(
         address owner,
         address operator,
-        address entryPoint_,
-        uint256 postOpCost_
-    ) nonZeroAddress(owner) nonZeroUint256(postOpCost_) StakeManager(entryPoint_) EIP712Service(operator) {
-        postOpCost = postOpCost_;
+        address entryPoint_
+    ) nonZeroAddress(owner) StakeManager(entryPoint_) EIP712Service(operator) {
         _grantRole(DEFAULT_ADMIN_ROLE, owner);
     }
 
@@ -68,12 +62,13 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         uint256 /* maxCost */
     ) external onlyEntryPoint whenNotPaused returns (bytes memory context, uint256 validationData) {
         address token;
-        uint256 tokenPriceWei;
+        uint256 exchangeRate;
+        uint256 postOpCost;
 
-        (token, tokenPriceWei, validationData) = _validateAndDecodePaymasterAndData(userOp);
+        (token, exchangeRate, postOpCost, validationData) = _validateAndDecodePaymasterAndData(userOp);
         if (validationData == SIG_VALIDATION_FAILED) return (bytes(""), SIG_VALIDATION_FAILED);
 
-        context = abi.encodePacked(token, tokenPriceWei, userOp.sender, userOpHash);
+        context = abi.encodePacked(token, exchangeRate, postOpCost, userOp.sender, userOpHash);
         validationData = SIG_VALIDATION_SUCCESS;
     }
 
@@ -88,7 +83,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     ) external onlyEntryPoint whenNotPaused {
         if (context.length != CONTEXT_LENGTH) revert InvalidPostOpContextLength(context.length);
 
-        (address token, uint256 tokenPriceWei, address sender, bytes32 userOpHash) = _parseContext(
+        (address token, uint256 exchangeRate, uint256 postOpCost, address sender, bytes32 userOpHash) = _parseContext(
             context
         );
 
@@ -96,7 +91,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         uint256 actualTokenNeeded;
         unchecked {
             actualTokenNeeded =
-                ((actualGasCost + postOpCost * actualUserOpFeePerGas) * tokenPriceWei) /
+                ((actualGasCost + postOpCost * actualUserOpFeePerGas) * exchangeRate) /
                 TOKEN_PRICE_DENOMINATOR;
         }
 
@@ -104,7 +99,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         // User must have sufficient allowance or include approve in userOp calldata
         IERC20(token).safeTransferFrom(sender, address(this), actualTokenNeeded);
 
-        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, tokenPriceWei);
+        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
     }
 
     /**
@@ -180,21 +175,31 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     )
         private
         pure
-        returns (address token, uint256 tokenPriceWei, address sender, bytes32 userOpHash)
+        returns (address token, uint256 exchangeRate, uint256 postOpCost, address sender, bytes32 userOpHash)
     {
         assembly {
-            // Load data directly from calldata using assembly for gas efficiency
-            // shr(96, ...) shifts right by 96 bits to extract address (160 bits) from 256-bit word
-            token := shr(96, calldataload(add(context.offset, 0))) // bytes 0-19: address (20 bytes)
-            tokenPriceWei := calldataload(add(context.offset, 20)) // bytes 20-51: uint256 (32 bytes)
-            sender := shr(96, calldataload(add(context.offset, 52))) // bytes 52-71: address (20 bytes)
-            userOpHash := calldataload(add(context.offset, 72)) // bytes 72-103: bytes32 (32 bytes)
+            let offset := context.offset
+
+            // 0–19: address token (right-aligned in 32 bytes)
+            token := shr(96, calldataload(offset))
+
+            // 20–51: uint256 exchangeRate (starts immediately after 20 bytes)
+            exchangeRate := calldataload(add(offset, 20))
+
+            // 52–83: uint256 postOpCost
+            postOpCost := calldataload(add(offset, 52))
+
+            // 84–103: address sender
+            sender := shr(96, calldataload(add(offset, 84)))
+
+            // 104–135: bytes32 userOpHash
+            userOpHash := calldataload(add(offset, 104))
         }
     }
 
     function _validateAndDecodePaymasterAndData(
         PackedUserOperation calldata userOp
-    ) private returns (address token, uint256 tokenPriceWei, uint256 validationData) {
+    ) private returns (address token, uint256 exchangeRate, uint256 postOpCost, uint256 validationData) {
         // Validate exact paymaster data length for fixed PaymasterPaymentData structure
         if (userOp.paymasterAndData.length != PAYMASTER_DATA_LENGTH) {
             revert InvalidPaymasterAndDataLength(userOp.paymasterAndData.length);
@@ -209,6 +214,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         validationData = _validatePaymentSignature(userOp.sender, paymentData, userOp.callData);
 
         token = paymentData.token;
-        tokenPriceWei = paymentData.tokenPriceWei;
+        exchangeRate = paymentData.exchangeRate;
+        postOpCost = paymentData.postOpCost;
     }
 }

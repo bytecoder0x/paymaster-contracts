@@ -16,9 +16,9 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
      */
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
-    /// @dev keccak256("PaymasterPaymentData(address token,uint256 tokenPriceWei,address user,bytes32 callDataHash,uint256 nonce,uint256 deadline)")
+    /// @dev keccak256("PaymasterPaymentData(address token,uint256 exchangeRate,uint256 postOpCost,address user,bytes32 callDataHash,uint256 nonce,uint256 deadline)")
     bytes32 public constant PAYMASTER_PAYMENT_TYPEHASH =
-        0x39a28d7a0e7d79abb107bbcaebdf123fbdcf7d3fd6562d234d759c004a60d57d;
+        0x5d1d1535d2d191dd7ae7ad33fbfa51e916ae07650ca5da8a7c02894ba9a35bd0;
 
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
@@ -35,7 +35,13 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
         address from,
         PaymasterPaymentData memory param,
         bytes calldata callData
-    ) internal nonZeroAddress(param.token) nonZeroUint256(param.tokenPriceWei) returns (uint256 validationData) {
+    )
+        internal
+        nonZeroAddress(param.token)
+        nonZeroUint256(param.exchangeRate)
+        nonZeroUint256(param.postOpCost)
+        returns (uint256 validationData)
+    {
         // Check signature deadline
         if (param.deadline < block.timestamp) {
             return SIG_VALIDATION_FAILED;
@@ -48,10 +54,11 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
             param.token,
-            param.tokenPriceWei,
+            param.exchangeRate,
+            param.postOpCost,
             from, // user address (from userOp.sender)
             callDataHash, // callData hash (computed from userOp.callData)
-            param.nonce, // nonce for replay protection
+            param.nonce,
             param.deadline
         );
 

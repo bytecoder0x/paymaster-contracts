@@ -1,5 +1,5 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { expect } from "chai";
+import { expect, use } from "chai";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { ethers } from "hardhat";
 import {
@@ -12,12 +12,12 @@ import {
 import { getPaymentSignature, getUserOp } from "./utils";
 import {
   EventLog,
-  formatUnits,
   HDNodeWallet,
   MaxUint256,
   parseUnits,
   randomBytes,
   Wallet,
+  ZeroAddress,
   ZeroHash,
 } from "ethers";
 import { FEES, GAS } from "./constants";
@@ -30,7 +30,6 @@ describe("TokenPaymaster", () => {
   let beneficiary: SignerWithAddress;
 
   const ENTRY_POINT_V08 = "0x4337084d9e255ff0702461cf8895ce9e3b5ff108";
-  const POST_OP_COST = 30000n;
 
   const setup = async () => {
     [deployer, operator, beneficiary] = await ethers.getSigners();
@@ -47,7 +46,6 @@ describe("TokenPaymaster", () => {
       deployer,
       operator,
       entryPoint,
-      POST_OP_COST,
     ]);
     await entryPoint.depositTo(paymaster, { value: parseUnits("100") });
     await paymaster.addStake(1, { value: parseUnits("100") });
@@ -73,6 +71,23 @@ describe("TokenPaymaster", () => {
   };
 
   describe("validatePaymasterUserOp", function () {
+    it("should be called only by EntryPoint", async () => {
+      const { paymaster, entryPoint, sender } = await loadFixture(setup);
+      const userOp = {
+        sender,
+        nonce: await entryPoint.getNonce(sender, 0),
+        initCode: "0x",
+        callData: "0x",
+        accountGasLimits: ZeroHash,
+        preVerificationGas: 0n,
+        gasFees: ZeroHash,
+        paymasterAndData: "0x",
+        signature: "0x",
+      };
+      const tx = paymaster.validatePaymasterUserOp(userOp, ZeroHash, 0);
+      await expect(tx).to.be.revertedWithCustomError(paymaster, "OnlyEntryPoint");
+    });
+
     it("should revert if paymaster data has wrong length", async () => {
       const { paymaster, entryPoint, sender, targetContract } = await loadFixture(setup);
 
@@ -102,7 +117,8 @@ describe("TokenPaymaster", () => {
           "MockERC20",
           "0x0000000000000000000000000000000000000001",
         ), // Non-zero for encoding
-        tokenPriceWei: BigInt(1),
+        exchangeRate: BigInt(1),
+        postOpCost: 123n,
         operator,
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
@@ -136,57 +152,8 @@ describe("TokenPaymaster", () => {
         .withArgs(
           0,
           "AA33 reverted",
-          paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [296]), // 276 + 20
+          paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [328]),
         );
-    });
-
-    it("should revert if invalid payment params", async () => {
-      const { paymaster, entryPoint, usdc, sender, targetContract } = await loadFixture(setup);
-
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei: 12345n,
-        operator,
-      };
-      // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      const tx = await entryPoint.handleOps([userOp], beneficiary);
-      const receipt = await tx.wait();
-
-      // Check that PostOpRevertReason event was emitted due to insufficient allowance
-      const revertLog = receipt?.logs.find(
-        log => log.topics[0] === entryPoint.interface.getEvent("PostOpRevertReason").topicHash,
-      );
-
-      expect(revertLog).to.not.be.undefined;
-      const errorData = (revertLog as EventLog).args[3];
-      const postOpErrorReason = entryPoint.interface.parseError(errorData)?.args[0];
-      const parsed = usdc.interface.parseError(postOpErrorReason);
-
-      expect(parsed).to.not.be.null;
-      expect(parsed?.name).to.equal("ERC20InsufficientAllowance");
     });
 
     it("should revert if wrong operator signature", async () => {
@@ -195,7 +162,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: 12345n,
+        exchangeRate: 12345n,
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
@@ -230,65 +198,17 @@ describe("TokenPaymaster", () => {
         .withArgs(0, "AA34 signature error");
     });
 
-    it("should revert if prefund failed", async () => {
-      const { paymaster, entryPoint, sender, usdc, targetContract } = await loadFixture(setup);
-
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei: 1234n,
-        operator,
-      };
-      const callData = targetContract.interface.encodeFunctionData("count");
-      // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      const tx = await entryPoint.handleOps([userOp], beneficiary);
-      const receipt = await tx.wait();
-
-      // Check that PostOpRevertReason event was emitted due to insufficient allowance
-      const revertLog = receipt?.logs.find(
-        log => log.topics[0] === entryPoint.interface.getEvent("PostOpRevertReason").topicHash,
-      );
-
-      expect(revertLog).to.not.be.undefined;
-      const errorData = (revertLog as EventLog).args[3];
-      const postOpErrorReason = entryPoint.interface.parseError(errorData)?.args[0];
-      const parsed = usdc.interface.parseError(postOpErrorReason);
-
-      expect(parsed).to.not.be.null;
-      expect(parsed?.name).to.equal("ERC20InsufficientAllowance");
-    });
-
     it("should revert if out of gas", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
-      const tokenPriceWei = BigInt(4e8);
+      const exchangeRate = BigInt(4e8);
+      const postOpCost = 30000n;
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei,
+        exchangeRate,
+        postOpCost,
         operator,
       };
       const callData = targetContract.interface.encodeFunctionData("count");
@@ -309,8 +229,8 @@ describe("TokenPaymaster", () => {
       const feesPerGas = new FeePerGas();
       feesPerGas.maxFeePerGas = 2e10;
       feesPerGas.maxPriorityFeePerGas = 1e9;
-      gasLimits.paymasterVerification = 30_000;
-      gasLimits.paymasterPostOp = 5_000;
+      gasLimits.paymasterVerification = 1_000;
+      gasLimits.paymasterPostOp = postOpCost;
 
       const userOp = await getUserOp(
         entryPoint,
@@ -336,48 +256,6 @@ describe("TokenPaymaster", () => {
       // }
     });
 
-    it("should prefund with ERC20 tokens", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
-
-      // tokenPriceWei = (10^erc20_decimals * price_eth) / price_erc20
-      const tokenPriceWei = BigInt(2500 * 1e6); // already multiplied with 10^18
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei,
-
-        operator,
-      };
-      // Create the full userOp callData that will be used in the actual transaction
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      const tx = entryPoint.handleOps([userOp], beneficiary);
-      // Check that operation succeeded and tokens were transferred in postOp
-      await expect(tx).to.emit(usdc, "Transfer");
-    });
-
     it("CALLDATA: should validate callDataHash correctly", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
 
@@ -386,8 +264,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
-
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
 
@@ -434,8 +312,8 @@ describe("TokenPaymaster", () => {
 
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
-
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
 
@@ -481,8 +359,8 @@ describe("TokenPaymaster", () => {
 
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
-
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
 
@@ -535,16 +413,23 @@ describe("TokenPaymaster", () => {
   });
 
   describe("postOp", async () => {
+    it("should be called only by EntryPoint", async () => {
+      const { paymaster } = await loadFixture(setup);
+      const tx = paymaster.postOp(0, "0xdeadbeef", 124, 22222);
+      await expect(tx).to.be.revertedWithCustomError(paymaster, "OnlyEntryPoint");
+    });
+
     it("should transfer exact token amount in postOp", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
-      const tokenPriceWei = BigInt(2500 * 1e6);
+      const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei,
+        exchangeRate,
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
@@ -588,11 +473,12 @@ describe("TokenPaymaster", () => {
 
       // Note: No approve call - this should cause insufficient allowance error in postOp
 
-      const tokenPriceWei = BigInt(2500 * 1e6);
+      const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei,
+        exchangeRate,
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
@@ -642,12 +528,12 @@ describe("TokenPaymaster", () => {
 
       await approveToPaymaster(sender, paymaster, usdc);
 
-      const tokenPriceWei = BigInt(2500 * 1e6);
+      const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei,
-
+        exchangeRate,
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       // Create the full userOp callData that will be used in the actual transaction
@@ -674,16 +560,9 @@ describe("TokenPaymaster", () => {
       );
 
       const userOpHash = await entryPoint.getUserOpHash(userOp);
-      const actualGasCost = 2051930000000000n;
-      const actualUserOpFeePerGas = FEES.MAX_FEE_PER_GAS;
-      const actualTokenAmount =
-        (actualGasCost + POST_OP_COST * actualUserOpFeePerGas) * paymentStruct.tokenPriceWei;
-
       const txPromise = entryPoint.handleOps([userOp], beneficiary);
       const tx = await txPromise;
       const receipt = await tx.wait();
-
-      // Clean up the calculated values (not used anymore)
 
       // Check UserOperationSponsored event with flexible gas amount due to optimizations
       const sponsoredEvents = await paymaster.queryFilter(
@@ -696,12 +575,32 @@ describe("TokenPaymaster", () => {
       expect(event.args[0]).to.equal(sender.target.toString());
       expect(event.args[1]).to.equal(userOpHash);
       expect(event.args[2]).to.equal(usdc.target.toString());
-      expect(event.args[3]).to.be.greaterThan(0); // actualTokenAmount should be positive
-      expect(event.args[4]).to.equal(tokenPriceWei);
+      expect(event.args[3]).to.be.greaterThan(0);
+      expect(event.args[4]).to.equal(exchangeRate);
     });
   });
 
   describe("StakeManager functions", () => {
+    it("should be called only by default admin", async () => {
+      const { paymaster } = await loadFixture(setup);
+
+      await expect(paymaster.connect(beneficiary).withdrawTo(beneficiary, 123))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+
+      await expect(paymaster.connect(beneficiary).addStake(9999))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+
+      await expect(paymaster.connect(beneficiary).unlockStake())
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+
+      await expect(paymaster.connect(beneficiary).withdrawStake(beneficiary))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+    });
+
     it("should deposit to EntryPoint", async () => {
       const { paymaster } = await loadFixture(setup);
 
@@ -798,7 +697,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
@@ -857,7 +757,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
         deadline: expiredDeadline, // Generate signature with expired deadline
       };
@@ -898,7 +799,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator: beneficiary, // Invalid operator
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
@@ -940,7 +842,8 @@ describe("TokenPaymaster", () => {
       const failingCallData = targetContract.interface.encodeFunctionData("countFail");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
@@ -967,103 +870,6 @@ describe("TokenPaymaster", () => {
       );
 
       // Operation should succeed even if inner call fails - paymaster keeps all tokens
-      const tx = await entryPoint.handleOps([userOp], beneficiary);
-      await expect(tx).to.emit(paymaster, "UserOperationSponsored");
-    });
-
-    it("should not refund small amounts (< 10%)", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
-
-      // Use exact price calculation to create small refund that should be kept
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei: BigInt(25 * 1e9), // Price designed to create ~5% excess (< 10% threshold)
-        operator,
-      };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      const txPromise = entryPoint.handleOps([userOp], beneficiary);
-      const tx = await txPromise;
-      const receipt = await tx.wait();
-
-      // Check transfer events more carefully
-      const transferEvents = await usdc.queryFilter(
-        usdc.filters.Transfer(),
-        receipt?.blockNumber,
-        receipt?.blockNumber,
-      );
-
-      // Find refund transfers (paymaster -> sender)
-      const refundTransfers = transferEvents.filter(
-        e => e.args[0] === paymaster.target.toString() && e.args[1] === sender.target.toString(),
-      );
-
-      // Refund should either not happen or be very small (acceptable outcome)
-      if (refundTransfers.length > 0) {
-        // If refund happened, it should be small (this tests the edge case behavior)
-        expect(refundTransfers[0].args[2]).to.be.lessThan(parseUnits("100", 6));
-      }
-    });
-
-    it("should handle actualTokenNeeded > tokenAmount case", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
-
-      // Use very low token price to make actualTokenNeeded exceed prefunded amount
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        tokenPriceWei: BigInt(1000), // Very low price
-        operator,
-      };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-
-      const userOp = await getUserOp(
-        entryPoint,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
       const tx = await entryPoint.handleOps([userOp], beneficiary);
       await expect(tx).to.emit(paymaster, "UserOperationSponsored");
     });
@@ -1175,6 +981,41 @@ describe("TokenPaymaster", () => {
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
+    it("withdraw operations should revert if recipient zero address", async () => {
+      const { paymaster, usdc } = await loadFixture(setup);
+
+      await expect(
+        paymaster.withdrawTokens(usdc, ZeroAddress, parseUnits("100", 6)),
+      ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
+
+      await expect(
+        paymaster.withdrawTokensBatch([usdc], [parseUnits("100", 6)], ZeroAddress),
+      ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
+    });
+
+    it("should revert single withdraw with zero amount", async () => {
+      const { paymaster, usdc } = await loadFixture(setup);
+
+      await expect(paymaster.withdrawTokens(usdc, deployer, 0)).to.be.revertedWithCustomError(
+        paymaster,
+        "ZeroUint256",
+      );
+    });
+
+    it("withdraw operations should be done only by default admin", async () => {
+      const { paymaster, usdc } = await loadFixture(setup);
+
+      await expect(paymaster.connect(beneficiary).withdrawTokens(usdc, beneficiary, 123))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+
+      await expect(
+        paymaster.connect(beneficiary).withdrawTokensBatch([usdc], [MaxUint256], beneficiary),
+      )
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+    });
+
     it("should test ECDSA recovery error handling", async () => {
       const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
 
@@ -1183,7 +1024,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: BigInt(2500 * 1e6),
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
@@ -1229,7 +1071,8 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: zeroToken,
-        tokenPriceWei: BigInt(2500 * 1e6),
+        exchangeRate: BigInt(2500 * 1e6),
+        postOpCost: GAS.PAYMASTER_POST_OP,
         operator,
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
@@ -1266,7 +1109,46 @@ describe("TokenPaymaster", () => {
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
-        tokenPriceWei: 0n, // Zero price
+        exchangeRate: 0n, // Zero price
+        postOpCost: GAS.PAYMASTER_POST_OP,
+        operator,
+      };
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+
+      const userOp = await getUserOp(
+        entryPoint,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n,
+        callData,
+        { ...paymentStruct, ...paymentSignature },
+      );
+
+      await expect(entryPoint.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+        .withArgs(0, "AA33 reverted", paymaster.interface.encodeErrorResult("ZeroUint256", []));
+    });
+
+    it("should fail with zero postOp cost", async () => {
+      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const paymentStruct = {
+        token: usdc,
+        exchangeRate: 2999000000n,
+        postOpCost: 0,
         operator,
       };
       const userOpCallData = sender.interface.encodeFunctionData("execute", [
