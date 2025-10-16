@@ -4,5 +4,4 @@ export interface DeployConfig {
   owner: string;
   operator: string;
   entryPoint: string;
-  postOpCost: Uint256;
 }

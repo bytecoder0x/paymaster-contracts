@@ -6,8 +6,8 @@ import { DEPLOY_CONSTANTS } from "../../constants";
 import { network } from "hardhat";
 
 const TokenPaymasterModule = buildModule("TokenPaymasterModule", m => {
-  const { owner, operator, entryPoint, postOpCost } = DEPLOY_CONSTANTS[network.name];
-  const paymaster = m.contract("TokenPaymaster", [owner, operator, entryPoint, postOpCost]);
+  const { owner, operator, entryPoint } = DEPLOY_CONSTANTS[network.name];
+  const paymaster = m.contract("TokenPaymaster", [owner, operator, entryPoint]);
 
   return { paymaster };
 });

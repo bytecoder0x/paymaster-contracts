@@ -1,13 +1,4 @@
-import "dotenv/config";
-import {
-  Address,
-  createPublicClient,
-  encodeFunctionData,
-  erc20Abi,
-  http,
-  maxUint256,
-  parseAbiParameters,
-} from "viem";
+import { Address, createPublicClient, encodeFunctionData, erc20Abi, http, maxUint256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import {
   createBundlerClient,
@@ -16,8 +7,9 @@ import {
 } from "viem/account-abstraction";
 import { mainnet } from "viem/chains";
 import { createPimlicoClient } from "permissionless/clients/pimlico";
+import "dotenv/config";
 
-const privateKey = `0x${process.env.DEPLOYER_PRIVATE_KEY}`;
+const privateKey = `0x${process.env.TEST_PRIVATE_KEY}`;
 
 const eoa7702 = privateKeyToAccount(privateKey as Address);
 const chain = mainnet;
@@ -57,7 +49,6 @@ const approveUsdcCall = {
     args: [paymasterAddress, maxUint256],
   }) as Address,
 };
-
 
 async function main() {
   const account = await toSimple7702SmartAccount({
