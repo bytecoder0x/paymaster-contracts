@@ -2,10 +2,8 @@ import "dotenv/config";
 import {
   Address,
   createPublicClient,
-  decodeAbiParameters,
   encodeFunctionData,
   erc20Abi,
-  Hex,
   http,
   maxUint256,
   parseAbiParameters,
@@ -16,7 +14,7 @@ import {
   createPaymasterClient,
   toSimple7702SmartAccount,
 } from "viem/account-abstraction";
-import { mainnet, sepolia } from "viem/chains";
+import { mainnet } from "viem/chains";
 import { createPimlicoClient } from "permissionless/clients/pimlico";
 
 const privateKey = `0x${process.env.DEPLOYER_PRIVATE_KEY}`;
@@ -42,14 +40,9 @@ const paymasterClient = createPaymasterClient({
   transport: http(customPaymasterUrl),
 });
 
-// const paymasterClient = createPaymasterClient({
-//   transport: http(pimlicoUrl),
-// });
-
-// const pimlicoClient = createPimlicoClient({
-//   transport: http(pimlicoUrl),
-//   chain,
-// });
+const pimlicoClient = createPimlicoClient({
+  transport: http(bundlerUrl),
+});
 
 const entryPointAddress = "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108" as Address;
 const paymasterAddress = "0x0000000000000000000000000000000000000000" as Address;
@@ -65,15 +58,6 @@ const approveUsdcCall = {
   }) as Address,
 };
 
-const abiParams = parseAbiParameters([
-  "address token",
-  "uint256 tokenPriceWei",
-  "uint256 nonce",
-  "uint256 deadline",
-  "uint8 v",
-  "bytes32 r",
-  "bytes32 s",
-]);
 
 async function main() {
   const account = await toSimple7702SmartAccount({
@@ -90,6 +74,18 @@ async function main() {
   });
   console.log("eoaCode", eoaCode);
 
+  const authorization =
+    eoaCode !== "0xe6Cae83BdE06E4c305530e199D7217f42808555B".toLowerCase()
+      ? await eoa7702.signAuthorization({
+          address: "0xe6Cae83BdE06E4c305530e199D7217f42808555B",
+          chainId: chain.id,
+          nonce: await client.getTransactionCount({
+            address: eoa7702.address,
+          }),
+        })
+      : undefined;
+  console.log("authorization", authorization);
+
   const callData = encodeFunctionData({
     abi: account.abi,
     functionName: "execute",
@@ -99,6 +95,14 @@ async function main() {
   const {
     standard: { maxFeePerGas, maxPriorityFeePerGas },
   } = await pimlicoClient.getUserOperationGasPrice();
+
+  // network gas - alternative to pimlico
+  // const maxPriorityFeePerGas = await client.estimateMaxPriorityFeePerGas();
+  // const maxPriorityFeePerGas = 50000000n; // pimlico bundler requirements
+  // console.log("maxPriorityFeePerGas", maxPriorityFeePerGas);
+  // let maxFeePerGas = await client.getGasPrice();
+  // maxFeePerGas = (maxFeePerGas * 130n) / 100n;
+  // console.log("maxFeePerGas", maxFeePerGas);
 
   const getPaymasterStubDataRes = await paymasterClient.getPaymasterStubData({
     callData,
@@ -112,66 +116,43 @@ async function main() {
   });
   console.log("getPaymasterStubDataRes", getPaymasterStubDataRes);
 
-  const { paymaster, paymasterData, paymasterPostOpGasLimit, paymasterVerificationGasLimit } =
-    getPaymasterStubDataRes;
+  const { paymaster, paymasterData } = getPaymasterStubDataRes;
 
-  // const decoded = decodeAbiParameters(abiParams, paymasterData!);
-  // console.log(decoded);
-
-  const userOperationGas = await bundlerClient.estimateUserOperationGas({
+  const estimateGasRes = await bundlerClient.estimateUserOperationGas({
+    callData,
+    authorization,
     account,
-    callData,
-    maxPriorityFeePerGas,
-    maxFeePerGas,
-    ...getPaymasterStubDataRes,
-  });
-  console.log("gasData", userOperationGas);
-
-  const { callGasLimit, preVerificationGas, verificationGasLimit } = userOperationGas;
-
-  const getPaymasterDataRes = await paymasterClient.getPaymasterData({
-    callData,
-    callGasLimit,
-    chainId: chain.id,
-    context: { token: usdcAddress },
-    entryPointAddress,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
     nonce: smartAccountNonce,
+    entryPointAddress: "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108",
+    paymaster,
+    paymasterData,
+  });
+  const {
+    callGasLimit,
     preVerificationGas,
-    sender: account.address,
     verificationGasLimit,
     paymasterPostOpGasLimit,
     paymasterVerificationGasLimit,
+  } = estimateGasRes;
+  console.log("callGasLimit", callGasLimit);
+  console.log("preVerificationGas", preVerificationGas);
+  console.log("verificationGasLimit", verificationGasLimit);
+  console.log("paymasterPostOpGasLimit", paymasterPostOpGasLimit);
+  console.log("paymasterVerificationGasLimit", paymasterVerificationGasLimit);
+
+  const txHash = await bundlerClient.sendUserOperation({
+    callData,
+    authorization,
+    account,
+    nonce: smartAccountNonce,
+    entryPointAddress: "0x4337084D9E255Ff0702461CF8895CE9E3b5Ff108",
+    maxFeePerGas,
+    maxPriorityFeePerGas,
+    paymaster,
+    paymasterData,
+    ...estimateGasRes,
   });
-  console.log("getPaymasterDataRes", getPaymasterDataRes);
-
-  // const userOp = {
-  //   callData,
-  //   nonce: smartAccountNonce,
-  //   sender: account.address,
-  //   maxFeePerGas,
-  //   maxPriorityFeePerGas,
-  //   signature: '0x' as Hex,
-  //   paymaster,
-  //   paymasterData,
-  //   paymasterPostOpGasLimit,
-  //   paymasterVerificationGasLimit,
-  //   callGasLimit,
-  //   preVerificationGas,
-  //   verificationGasLimit,
-  // };
-
-  // const signature = await account.signUserOperation(userOp);
-
-  // console.log('signature', signature);
-
-  // const txHash = await bundlerClient.sendUserOperation({
-  //   ...userOp,
-  //   signature,
-  //   entryPointAddress,
-  // });
-  // console.log('UserOperation hash:', txHash);
+  console.log("UserOperation hash:", txHash);
 }
 
 main();
