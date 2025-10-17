@@ -546,6 +546,34 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@metamask/delegation-abis@npm:^0.11.0":
+  version: 0.11.0
+  resolution: "@metamask/delegation-abis@npm:0.11.0"
+  checksum: 10c0/92a240ddc5c89fe6d128e6f54884cc443c260ac59fba27c3717ed2e2715ddf128e54659a4a10384d4aa6ab8f83153fefa72e2e3205b94f696995d870041fc2eb
+  languageName: node
+  linkType: hard
+
+"@metamask/delegation-deployments@npm:^0.12.0":
+  version: 0.12.0
+  resolution: "@metamask/delegation-deployments@npm:0.12.0"
+  checksum: 10c0/852f42d68a813c56a9886839f97ace1b80c8c4687c83bd2cdbaf0997329a54c7264d706c354ac81ad63952b7eb58e3c683497b7dcfd0475748e93888723ea13f
+  languageName: node
+  linkType: hard
+
+"@metamask/delegation-toolkit@npm:^0.12.0":
+  version: 0.12.0
+  resolution: "@metamask/delegation-toolkit@npm:0.12.0"
+  dependencies:
+    "@metamask/delegation-abis": "npm:^0.11.0"
+    "@metamask/delegation-deployments": "npm:^0.12.0"
+    buffer: "npm:^6.0.3"
+    webauthn-p256: "npm:^0.0.10"
+  peerDependencies:
+    viem: ">=2.18.2 <3.0.0"
+  checksum: 10c0/dba52869510e3a83692990e2f5302fcaea4c9cfaa6123cf505f7808b7dd4008146cf37fdebf13e6beba5bf83237b70631d13c9edb9e03397d2687ceff55fb404
+  languageName: node
+  linkType: hard
+
 "@noble/ciphers@npm:^1.3.0":
   version: 1.3.0
   resolution: "@noble/ciphers@npm:1.3.0"
@@ -577,6 +605,15 @@ __metadata:
   dependencies:
     "@noble/hashes": "npm:1.8.0"
   checksum: 10c0/21d049ae4558beedbf5da0004407b72db84360fa29d64822d82dc9e80251e1ecb46023590cc4b20e70eed697d1b87279b4911dc39f8694c51c874289cfc8e9a7
+  languageName: node
+  linkType: hard
+
+"@noble/curves@npm:^1.4.0":
+  version: 1.9.4
+  resolution: "@noble/curves@npm:1.9.4"
+  dependencies:
+    "@noble/hashes": "npm:1.8.0"
+  checksum: 10c0/c5ac42bf0c4ac822ee7c107f7b5647140a4209bce6929cdf21a38bc575be8aa91c130c4d4bea5a8a3100c53728fc0c6757382f005779cd14b10ea9a00f1a4592
   languageName: node
   linkType: hard
 
@@ -1741,6 +1778,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"base64-js@npm:^1.3.1":
+  version: 1.5.1
+  resolution: "base64-js@npm:1.5.1"
+  checksum: 10c0/f23823513b63173a001030fae4f2dabe283b99a9d324ade3ad3d148e218134676f1ee8568c877cd79ec1c53158dcf2d2ba527a97c606618928ba99dd930102bf
+  languageName: node
+  linkType: hard
+
 "base64-sol@npm:1.0.1":
   version: 1.0.1
   resolution: "base64-sol@npm:1.0.1"
@@ -1893,6 +1937,16 @@ __metadata:
   version: 1.0.3
   resolution: "buffer-xor@npm:1.0.3"
   checksum: 10c0/fd269d0e0bf71ecac3146187cfc79edc9dbb054e2ee69b4d97dfb857c6d997c33de391696d04bdd669272751fa48e7872a22f3a6c7b07d6c0bc31dbe02a4075c
+  languageName: node
+  linkType: hard
+
+"buffer@npm:^6.0.3":
+  version: 6.0.3
+  resolution: "buffer@npm:6.0.3"
+  dependencies:
+    base64-js: "npm:^1.3.1"
+    ieee754: "npm:^1.2.1"
+  checksum: 10c0/2a905fbbcde73cc5d8bd18d1caa23715d5f83a5935867c2329f0ac06104204ba7947be098fe1317fbd8830e26090ff8e764f08cd14fefc977bb248c3487bcbd0
   languageName: node
   linkType: hard
 
@@ -3483,6 +3537,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"ieee754@npm:^1.2.1":
+  version: 1.2.1
+  resolution: "ieee754@npm:1.2.1"
+  checksum: 10c0/b0782ef5e0935b9f12883a2e2aa37baa75da6e66ce6515c168697b42160807d9330de9a32ec1ed73149aea02e0d822e572bca6f1e22bdcbd2149e13b050b17bb
+  languageName: node
+  linkType: hard
+
 "ignore@npm:^5.1.1":
   version: 5.3.2
   resolution: "ignore@npm:5.3.2"
@@ -4534,6 +4595,7 @@ __metadata:
   resolution: "paymaster-contracts@workspace:."
   dependencies:
     "@account-abstraction/contracts": "npm:^0.8.0"
+    "@metamask/delegation-toolkit": "npm:^0.12.0"
     "@nomicfoundation/hardhat-chai-matchers": "npm:^2.0.0"
     "@nomicfoundation/hardhat-ethers": "npm:^3.0.0"
     "@nomicfoundation/hardhat-ignition": "npm:^0.15.0"
@@ -5923,6 +5985,16 @@ __metadata:
     randombytes: "npm:^2.1.0"
     utf8: "npm:3.0.0"
   checksum: 10c0/fbd5c8ec71e944e9e66e3436dbd4446927c3edc95f81928723f9ac137e0d821c5cbb92dba0ed5bbac766f919f919c9d8e316e459c51d876d5188321642676677
+  languageName: node
+  linkType: hard
+
+"webauthn-p256@npm:^0.0.10":
+  version: 0.0.10
+  resolution: "webauthn-p256@npm:0.0.10"
+  dependencies:
+    "@noble/curves": "npm:^1.4.0"
+    "@noble/hashes": "npm:^1.4.0"
+  checksum: 10c0/27d836d81a1fec24a31d2d9b652f8ff6876b51940d1003bbd14dc5cfa57c58d84223b5a4eece229516522fd997bc0bc7be618ac42b129fb5fa42fa530060b16d
   languageName: node
   linkType: hard
 
