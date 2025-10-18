@@ -1,5 +1,5 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
-import { expect, use } from "chai";
+import { expect } from "chai";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
 import { ethers } from "hardhat";
 import {
@@ -28,16 +28,20 @@ describe("TokenPaymaster", () => {
   let operator: SignerWithAddress;
   let userSigner: HDNodeWallet;
   let beneficiary: SignerWithAddress;
+  let alice: SignerWithAddress;
 
+  const ENTRY_POINT_V06 = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789";
+  const ENTRY_POINT_V07 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
   const ENTRY_POINT_V08 = "0x4337084d9e255ff0702461cf8895ce9e3b5ff108";
 
   const setup = async () => {
-    [deployer, operator, beneficiary] = await ethers.getSigners();
+    [deployer, operator, beneficiary, alice] = await ethers.getSigners();
     userSigner = Wallet.createRandom(deployer.provider);
 
-    const entryPoint = IEntryPoint__factory.connect(ENTRY_POINT_V08, deployer);
+    const entryPointV8 = IEntryPoint__factory.connect(ENTRY_POINT_V08, deployer);
+    const entryPointV7 = IEntryPoint__factory.connect(ENTRY_POINT_V07, deployer);
 
-    const accountFactory = await ethers.deployContract("SimpleAccountFactory", [entryPoint]);
+    const accountFactory = await ethers.deployContract("SimpleAccountFactory", [entryPointV8]);
     const tx = await accountFactory.createAccount(userSigner, 123n);
     const res = await tx.wait();
     const sender = SimpleAccount__factory.connect((res?.logs[3] as EventLog).args[0], userSigner);
@@ -45,17 +49,21 @@ describe("TokenPaymaster", () => {
     const paymaster = await ethers.deployContract("TokenPaymaster", [
       deployer,
       operator,
-      entryPoint,
+      [ENTRY_POINT_V07, ENTRY_POINT_V08],
     ]);
-    await entryPoint.depositTo(paymaster, { value: parseUnits("100") });
-    await paymaster.addStake(1, { value: parseUnits("100") });
+    await Promise.all([
+      await entryPointV7.depositTo(paymaster, { value: parseUnits("100") }),
+      await entryPointV8.depositTo(paymaster, { value: parseUnits("100") }),
+      await paymaster.addStake(entryPointV7, 1, { value: parseUnits("100") }),
+      await paymaster.addStake(entryPointV8, 1, { value: parseUnits("100") }),
+    ]);
 
     const usdc = await ethers.deployContract("MockERC20");
     const targetContract = await ethers.deployContract("TestCounter");
 
     await usdc.transfer(sender, parseUnits("1000000", 6));
 
-    return { paymaster, usdc, entryPoint, sender, targetContract };
+    return { paymaster, usdc, entryPointV7, entryPointV8, sender, targetContract };
   };
 
   const approveToPaymaster = async (owner: SimpleAccount, paymaster: IPaymaster, token: IERC20) => {
@@ -71,11 +79,11 @@ describe("TokenPaymaster", () => {
   };
 
   describe("validatePaymasterUserOp", function () {
-    it("should be called only by EntryPoint", async () => {
-      const { paymaster, entryPoint, sender } = await loadFixture(setup);
+    it("should be called only by whitelisted EntryPoint", async () => {
+      const { paymaster, entryPointV8, sender } = await loadFixture(setup);
       const userOp = {
         sender,
-        nonce: await entryPoint.getNonce(sender, 0),
+        nonce: await entryPointV8.getNonce(sender, 0),
         initCode: "0x",
         callData: "0x",
         accountGasLimits: ZeroHash,
@@ -85,15 +93,17 @@ describe("TokenPaymaster", () => {
         signature: "0x",
       };
       const tx = paymaster.validatePaymasterUserOp(userOp, ZeroHash, 0);
-      await expect(tx).to.be.revertedWithCustomError(paymaster, "OnlyEntryPoint");
+      await expect(tx)
+        .to.be.revertedWithCustomError(paymaster, "EntryPointNotWhitelisted")
+        .withArgs(deployer.address);
     });
 
     it("should revert if paymaster data has wrong length", async () => {
-      const { paymaster, entryPoint, sender, targetContract } = await loadFixture(setup);
+      const { paymaster, entryPointV8, sender, targetContract } = await loadFixture(setup);
 
       // Test with too short data (only paymaster address + gas limits, no PaymasterPaymentData)
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -102,8 +112,8 @@ describe("TokenPaymaster", () => {
         targetContract.interface.encodeFunctionData("count"),
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(
           0,
           "AA33 reverted",
@@ -134,7 +144,7 @@ describe("TokenPaymaster", () => {
       );
 
       const validUserOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -147,8 +157,8 @@ describe("TokenPaymaster", () => {
       // Add extra bytes to make it longer than expected 276
       validUserOp.paymasterAndData += Buffer.from(randomBytes(20)).toString("hex");
 
-      await expect(entryPoint.handleOps([validUserOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+      await expect(entryPointV8.handleOps([validUserOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(
           0,
           "AA33 reverted",
@@ -157,7 +167,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert if wrong operator signature", async () => {
-      const { paymaster, entryPoint, sender, usdc, targetContract } = await loadFixture(setup);
+      const { paymaster, entryPointV8, sender, usdc, targetContract } = await loadFixture(setup);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -182,7 +192,7 @@ describe("TokenPaymaster", () => {
       paymentSignature.r = "0x" + Buffer.from(randomBytes(32)).toString("hex");
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -192,14 +202,14 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      const tx = entryPoint.handleOps([userOp], beneficiary);
+      const tx = entryPointV8.handleOps([userOp], beneficiary);
       await expect(tx)
-        .to.be.revertedWithCustomError(entryPoint, "FailedOp")
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOp")
         .withArgs(0, "AA34 signature error");
     });
 
     it("should revert if out of gas", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -233,7 +243,7 @@ describe("TokenPaymaster", () => {
       gasLimits.paymasterPostOp = postOpCost;
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -244,20 +254,20 @@ describe("TokenPaymaster", () => {
         gasLimits,
       );
 
-      const tx = entryPoint.handleOps([userOp], beneficiary);
+      const tx = entryPointV8.handleOps([userOp], beneficiary);
       await expect(tx)
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", "0x");
 
       // try {
-      //   await entryPoint.handleOps([userOp], beneficiary);
+      //   await entryPointV8.handleOps([userOp], beneficiary);
       // } catch (err: any) {
-      //   console.log(entryPoint.interface.decodeErrorResult("FailedOpWithRevert", err.data));
+      //   console.log(entryPointV8.interface.decodeErrorResult("FailedOpWithRevert", err.data));
       // }
     });
 
     it("CALLDATA: should validate callDataHash correctly", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -286,7 +296,7 @@ describe("TokenPaymaster", () => {
       // Use validated signature
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -296,14 +306,14 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      const tx = entryPoint.handleOps([userOp], beneficiary);
+      const tx = entryPointV8.handleOps([userOp], beneficiary);
 
       // Test successful execution - should transfer tokens in postOp
       await expect(tx).to.emit(usdc, "Transfer");
     });
 
     it("CALLDATA: should reject mismatched callData", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -333,7 +343,7 @@ describe("TokenPaymaster", () => {
 
       // But try to execute "number" function - should fail
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -343,14 +353,14 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      const tx = entryPoint.handleOps([userOp], beneficiary);
+      const tx = entryPointV8.handleOps([userOp], beneficiary);
       await expect(tx)
-        .to.be.revertedWithCustomError(entryPoint, "FailedOp")
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOp")
         .withArgs(0, "AA34 signature error");
     });
 
     it("CALLDATA + NONCE: should prevent replay attacks with same callData", async function () {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -379,7 +389,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp1 = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -390,12 +400,12 @@ describe("TokenPaymaster", () => {
       );
 
       // First operation should work
-      await entryPoint.handleOps([userOp1], beneficiary);
+      await entryPointV8.handleOps([userOp1], beneficiary);
       // First operation should work
 
       // Try to replay the same operation (same nonce, same callData)
       const userOp2 = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -406,21 +416,23 @@ describe("TokenPaymaster", () => {
       );
 
       // Should fail because operator nonce was already used
-      const tx = entryPoint.handleOps([userOp2], beneficiary);
+      const tx = entryPointV8.handleOps([userOp2], beneficiary);
       await expect(tx).to.be.reverted;
       // Replay attack prevented
     });
   });
 
   describe("postOp", async () => {
-    it("should be called only by EntryPoint", async () => {
+    it("should be called only by whitelisted EntryPoint", async () => {
       const { paymaster } = await loadFixture(setup);
       const tx = paymaster.postOp(0, "0xdeadbeef", 124, 22222);
-      await expect(tx).to.be.revertedWithCustomError(paymaster, "OnlyEntryPoint");
+      await expect(tx)
+        .to.be.revertedWithCustomError(paymaster, "EntryPointNotWhitelisted")
+        .withArgs(deployer.address);
     });
 
     it("should transfer exact token amount in postOp", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -445,7 +457,7 @@ describe("TokenPaymaster", () => {
         sender.target.toString(),
       );
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -455,7 +467,7 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      const tx = await entryPoint.handleOps([userOp], beneficiary);
+      const tx = await entryPointV8.handleOps([userOp], beneficiary);
       const receipt = await tx.wait();
 
       // Check that token transfer from sender to paymaster occurred in postOp
@@ -469,9 +481,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should emit postOp revert event if insufficient allowance", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
-
-      // Note: No approve call - this should cause insufficient allowance error in postOp
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
@@ -495,7 +505,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -505,17 +515,17 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      const tx = await entryPoint.handleOps([userOp], beneficiary);
+      const tx = await entryPointV8.handleOps([userOp], beneficiary);
       const receipt = await tx.wait();
       const revertLog = receipt?.logs.find(
-        log => log.topics[0] === entryPoint.interface.getEvent("PostOpRevertReason").topicHash,
+        log => log.topics[0] === entryPointV8.interface.getEvent("PostOpRevertReason").topicHash,
       );
 
       // Ensure revertLog exists
       expect(revertLog).to.not.be.undefined;
 
       const errorData = (revertLog as EventLog).args[3];
-      const postOpErrorReason = entryPoint.interface.parseError(errorData)?.args[0];
+      const postOpErrorReason = entryPointV8.interface.parseError(errorData)?.args[0];
       const parsed = usdc.interface.parseError(postOpErrorReason);
 
       expect(parsed).to.not.be.null;
@@ -524,7 +534,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should emit event", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -549,7 +559,7 @@ describe("TokenPaymaster", () => {
         sender.target.toString(),
       );
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -559,8 +569,8 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      const userOpHash = await entryPoint.getUserOpHash(userOp);
-      const txPromise = entryPoint.handleOps([userOp], beneficiary);
+      const userOpHash = await entryPointV8.getUserOpHash(userOp);
+      const txPromise = entryPointV8.handleOps([userOp], beneficiary);
       const tx = await txPromise;
       const receipt = await tx.wait();
 
@@ -581,99 +591,131 @@ describe("TokenPaymaster", () => {
   });
 
   describe("StakeManager functions", () => {
+    it("constructor: deploy should fail if no EntryPoints are set", async () => {
+      await expect(ethers.deployContract("TokenPaymaster", [deployer, operator, []])).to.be
+        .reverted;
+    });
+
     it("should be called only by default admin", async () => {
+      const { paymaster, entryPointV7, entryPointV8 } = await loadFixture(setup);
+
+      await expect(paymaster.connect(alice).withdrawTo(entryPointV7, alice, 123))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ZeroHash);
+
+      await expect(paymaster.connect(alice).addStake(entryPointV8, 9999))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ZeroHash);
+
+      await expect(paymaster.connect(alice).unlockStake(entryPointV7))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ZeroHash);
+
+      await expect(paymaster.connect(alice).withdrawStake(entryPointV8, alice))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ZeroHash);
+    });
+
+    it("should revert if EntryPoint is not whitelisted", async () => {
       const { paymaster } = await loadFixture(setup);
 
-      await expect(paymaster.connect(beneficiary).withdrawTo(beneficiary, 123))
-        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
-        .withArgs(beneficiary.address, ZeroHash);
+      await expect(paymaster.deposit(ENTRY_POINT_V06, { value: 123 }))
+        .to.be.revertedWithCustomError(paymaster, "EntryPointNotWhitelisted")
+        .withArgs(ENTRY_POINT_V06);
 
-      await expect(paymaster.connect(beneficiary).addStake(9999))
-        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
-        .withArgs(beneficiary.address, ZeroHash);
-
-      await expect(paymaster.connect(beneficiary).unlockStake())
-        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
-        .withArgs(beneficiary.address, ZeroHash);
-
-      await expect(paymaster.connect(beneficiary).withdrawStake(beneficiary))
-        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
-        .withArgs(beneficiary.address, ZeroHash);
+      await expect(paymaster.addStake(ENTRY_POINT_V06, 9999))
+        .to.be.revertedWithCustomError(paymaster, "EntryPointNotWhitelisted")
+        .withArgs(ENTRY_POINT_V06);
     });
 
     it("should deposit to EntryPoint", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV8 } = await loadFixture(setup);
 
-      const initialDeposit = await paymaster.getDeposit();
+      const initialDeposit = await paymaster.getDeposit(entryPointV8);
       const depositAmount = parseUnits("1");
 
-      await paymaster.deposit({ value: depositAmount });
+      await paymaster.deposit(entryPointV8, { value: depositAmount });
 
-      const finalDeposit = await paymaster.getDeposit();
+      const finalDeposit = await paymaster.getDeposit(entryPointV8);
       expect(finalDeposit - initialDeposit).to.equal(depositAmount);
     });
 
     it("should withdraw from EntryPoint", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV7 } = await loadFixture(setup);
 
-      await paymaster.deposit({ value: parseUnits("2") });
+      await paymaster.deposit(entryPointV7, { value: parseUnits("2") });
       const initialBalance = await ethers.provider.getBalance(beneficiary);
 
-      await paymaster.withdrawTo(beneficiary.address, parseUnits("1"));
+      await paymaster.withdrawTo(entryPointV7, beneficiary.address, parseUnits("1"));
 
       const finalBalance = await ethers.provider.getBalance(beneficiary);
       expect(finalBalance - initialBalance).to.equal(parseUnits("1"));
     });
 
     it("should revert withdrawTo with zero address", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV7 } = await loadFixture(setup);
 
       await expect(
-        paymaster.withdrawTo("0x0000000000000000000000000000000000000000", parseUnits("1")),
+        paymaster.withdrawTo(entryPointV7, ZeroAddress, parseUnits("1")),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
     it("should unlock stake", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV8 } = await loadFixture(setup);
 
-      await paymaster.unlockStake();
+      await paymaster.unlockStake(entryPointV8);
 
-      const stakeInfo = await paymaster.getStakeInfo();
+      const stakeInfo = await paymaster.getStakeInfo(entryPointV8);
       expect(stakeInfo.withdrawTime).to.be.gt(0);
     });
 
     it("should withdraw stake", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV7 } = await loadFixture(setup);
 
       // First unlock, then wait and withdraw
-      await paymaster.unlockStake();
+      await paymaster.unlockStake(entryPointV7);
 
       // Fast forward time to make withdrawal possible
       await ethers.provider.send("evm_increaseTime", [2]);
       await ethers.provider.send("evm_mine", []);
 
       const initialBalance = await ethers.provider.getBalance(beneficiary);
-      await paymaster.withdrawStake(beneficiary.address);
+      await paymaster.withdrawStake(entryPointV7, beneficiary.address);
       const finalBalance = await ethers.provider.getBalance(beneficiary);
 
       expect(finalBalance).to.be.gt(initialBalance);
     });
 
     it("should revert withdrawStake with zero address", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV8 } = await loadFixture(setup);
 
       await expect(
-        paymaster.withdrawStake("0x0000000000000000000000000000000000000000"),
+        paymaster.withdrawStake(entryPointV8, ZeroAddress),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
     it("should get stake info", async () => {
-      const { paymaster } = await loadFixture(setup);
+      const { paymaster, entryPointV7 } = await loadFixture(setup);
 
-      const stakeInfo = await paymaster.getStakeInfo();
+      const stakeInfo = await paymaster.getStakeInfo(entryPointV7);
       expect(stakeInfo.depositAmount).to.be.gt(0);
       expect(stakeInfo.staked).to.be.true;
       expect(stakeInfo.stake).to.be.gt(0);
+    });
+
+    it("should allow whitelist and de-whitelist EntryPoints", async () => {
+      const { paymaster, entryPointV7 } = await loadFixture(setup);
+
+      await paymaster.setEntryPointWhitelist(entryPointV7, false);
+      expect(await paymaster.entryPointWhitelist(entryPointV7)).to.be.false;
+
+      await paymaster.setEntryPointWhitelist(entryPointV7, true);
+      expect(await paymaster.entryPointWhitelist(entryPointV7)).to.be.true;
+
+      await expect(paymaster.setEntryPointWhitelist(ZeroAddress, true)).to.be.reverted;
+      await expect(paymaster.connect(alice).setEntryPointWhitelist(entryPointV7, true))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ZeroHash);
     });
   });
 
@@ -689,7 +731,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert operations when paused", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await paymaster.pause();
       await approveToPaymaster(sender, paymaster, usdc);
@@ -714,7 +756,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -724,8 +766,8 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary)).to.be.revertedWithCustomError(
-        entryPoint,
+      await expect(entryPointV8.handleOps([userOp], beneficiary)).to.be.revertedWithCustomError(
+        entryPointV8,
         "FailedOpWithRevert",
       );
     });
@@ -745,7 +787,7 @@ describe("TokenPaymaster", () => {
 
   describe("EIP712Service edge cases", () => {
     it("should fail validation with expired deadline", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -775,7 +817,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -785,13 +827,13 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOp")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOp")
         .withArgs(0, "AA34 signature error");
     });
 
     it("should fail validation with invalid operator", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -816,7 +858,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -826,15 +868,15 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOp")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOp")
         .withArgs(0, "AA34 signature error");
     });
   });
 
   describe("Additional coverage tests", () => {
     it("should handle failed operations without refund", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -859,7 +901,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -870,7 +912,7 @@ describe("TokenPaymaster", () => {
       );
 
       // Operation should succeed even if inner call fails - paymaster keeps all tokens
-      const tx = await entryPoint.handleOps([userOp], beneficiary);
+      const tx = await entryPointV8.handleOps([userOp], beneficiary);
       await expect(tx).to.emit(paymaster, "UserOperationSponsored");
     });
 
@@ -1017,7 +1059,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should test ECDSA recovery error handling", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       await approveToPaymaster(sender, paymaster, usdc);
 
@@ -1044,7 +1086,7 @@ describe("TokenPaymaster", () => {
       paymentSignature.s = "0x0000000000000000000000000000000000000000000000000000000000000001";
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -1054,13 +1096,13 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOp")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOp")
         .withArgs(0, "AA34 signature error");
     });
 
     it("should fail with zero token address", async () => {
-      const { paymaster, sender, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, entryPointV8, targetContract } = await loadFixture(setup);
 
       // Create a mock token with zero address
       const zeroToken = await ethers.getContractAt(
@@ -1088,7 +1130,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -1098,13 +1140,13 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", paymaster.interface.encodeErrorResult("ZeroAddress", []));
     });
 
     it("should fail with zero token price", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -1126,7 +1168,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -1136,13 +1178,13 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", paymaster.interface.encodeErrorResult("ZeroUint256", []));
     });
 
     it("should fail with zero postOp cost", async () => {
-      const { paymaster, sender, usdc, entryPoint, targetContract } = await loadFixture(setup);
+      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -1164,7 +1206,7 @@ describe("TokenPaymaster", () => {
       );
 
       const userOp = await getUserOp(
-        entryPoint,
+        entryPointV8,
         paymaster,
         userSigner,
         sender,
@@ -1174,8 +1216,8 @@ describe("TokenPaymaster", () => {
         { ...paymentStruct, ...paymentSignature },
       );
 
-      await expect(entryPoint.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPoint, "FailedOpWithRevert")
+      await expect(entryPointV8.handleOps([userOp], beneficiary))
+        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", paymaster.interface.encodeErrorResult("ZeroUint256", []));
     });
   });

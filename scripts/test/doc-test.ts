@@ -1,6 +1,7 @@
 import {
   Address,
   createPublicClient,
+  defineChain,
   encodeFunctionData,
   erc20Abi,
   http,
@@ -17,6 +18,25 @@ import { privateKeyToAccount } from "viem/accounts";
 import { Implementation, toMetaMaskSmartAccount } from "@metamask/delegation-toolkit";
 import "dotenv/config";
 
+const katana = defineChain({
+  id: 747474,
+  name: "Katana",
+  nativeCurrency: {
+    decimals: 18,
+    name: "Ether",
+    symbol: "ETH",
+  },
+  rpcUrls: {
+    default: {
+      http: ["https://rpc.katana.network"],
+      webSocket: ["wss://rpc.katana.network"],
+    },
+  },
+  blockExplorers: {
+    default: { name: "Katana Explorer", url: "https://katanascan.com/" },
+  },
+});
+
 async function main() {
   // 1. CONFIGURATION
   const privateKey = `0x${process.env.ACCOUNT_PK}`;
@@ -32,7 +52,7 @@ async function main() {
 
   // 2. INITIALIZE CLIENTS
   const client = createPublicClient({
-    chain: mainnet,
+    chain,
     transport: http(rpcUrl),
   });
 
@@ -97,7 +117,7 @@ async function main() {
   // 6. FETCH STUB DATA FROM PAYMASTER
   const smartAccountNonce = await account.getNonce();
   let maxFeePerGas = await client.getGasPrice();
-  maxFeePerGas = (maxFeePerGas * 105n) / 100n; // Add 30% for reliability
+  maxFeePerGas = (maxFeePerGas * 130n) / 100n; // Add 30% for reliability
   let maxPriorityFeePerGas = await client.estimateMaxPriorityFeePerGas();
   //   maxPriorityFeePerGas = maxPriorityFeePerGas * 2n; // Double for reliability
 
@@ -157,24 +177,24 @@ async function main() {
   console.log("paymasterPostOpGasLimit", paymasterPostOpGasLimit);
   console.log("paymasterVerificationGasLimit", paymasterVerificationGasLimit);
 
-  // 9. SEND USER OPERATION
-  const txHash = await bundlerClient.sendUserOperation({
-    callData,
-    authorization,
-    account,
-    nonce: smartAccountNonce,
-    entryPointAddress: entryPoint07Address,
-    maxFeePerGas,
-    maxPriorityFeePerGas,
-    paymaster,
-    paymasterData,
-    paymasterVerificationGasLimit,
-    paymasterPostOpGasLimit,
-    callGasLimit,
-    preVerificationGas,
-    verificationGasLimit,
-  });
-  console.log("UserOperation hash sent:", txHash);
+  // // 9. SEND USER OPERATION
+  // const txHash = await bundlerClient.sendUserOperation({
+  //   callData,
+  //   authorization,
+  //   account,
+  //   nonce: smartAccountNonce,
+  //   entryPointAddress: entryPoint07Address,
+  //   maxFeePerGas,
+  //   maxPriorityFeePerGas,
+  //   paymaster,
+  //   paymasterData,
+  //   paymasterVerificationGasLimit,
+  //   paymasterPostOpGasLimit,
+  //   callGasLimit,
+  //   preVerificationGas,
+  //   verificationGasLimit,
+  // });
+  // console.log("UserOperation hash sent:", txHash);
 }
 
 main().catch(console.error);

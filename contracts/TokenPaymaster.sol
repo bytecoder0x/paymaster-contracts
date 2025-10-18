@@ -25,32 +25,14 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
      * @notice Initializes the TokenPaymaster with the admin, operator, EntryPoint.
      * @param owner The address granted DEFAULT_ADMIN_ROLE.
      * @param operator The address granted OPERATOR_ROLE for signing paymaster authorizations.
-     * @param entryPoint_ The ERC-4337 EntryPoint contract address.
+     * @param entryPoints The ERC-4337 EntryPoint contract address.
      */
     constructor(
         address owner,
         address operator,
-        address entryPoint_
-    ) nonZeroAddress(owner) StakeManager(entryPoint_) EIP712Service(operator) {
+        address[] memory entryPoints
+    ) nonZeroAddress(owner) StakeManager(entryPoints) EIP712Service(operator) {
         _grantRole(DEFAULT_ADMIN_ROLE, owner);
-    }
-
-    /**
-     * @notice Pauses all paymaster operations.
-     * @dev Can only be called by an account with the DEFAULT_ADMIN_ROLE.
-     *      When paused, the contract rejects UserOperations and postOp execution.
-     */
-    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _pause();
-    }
-
-    /**
-     * @notice Resumes paymaster operations after a pause.
-     * @dev Can only be called by an account with the DEFAULT_ADMIN_ROLE.
-     *      Enables UserOperation validation and postOp logic to proceed normally.
-     */
-    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
-        _unpause();
     }
 
     /// @inheritdoc IPaymaster
@@ -60,7 +42,12 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         PackedUserOperation calldata userOp,
         bytes32 userOpHash,
         uint256 /* maxCost */
-    ) external onlyEntryPoint whenNotPaused returns (bytes memory context, uint256 validationData) {
+    )
+        external
+        onlySupportedEntryPoint(msg.sender)
+        whenNotPaused
+        returns (bytes memory context, uint256 validationData)
+    {
         address token;
         uint256 exchangeRate;
         uint256 postOpCost;
@@ -80,7 +67,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         bytes calldata context,
         uint256 actualGasCost,
         uint256 actualUserOpFeePerGas
-    ) external onlyEntryPoint whenNotPaused {
+    ) external onlySupportedEntryPoint(msg.sender) whenNotPaused {
         if (context.length != CONTEXT_LENGTH) revert InvalidPostOpContextLength(context.length);
 
         (address token, uint256 exchangeRate, uint256 postOpCost, address sender, bytes32 userOpHash) = _parseContext(
@@ -132,6 +119,24 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         address recipient
     ) external nonZeroAddress(recipient) onlyRole(DEFAULT_ADMIN_ROLE) {
         _withdrawTokensBatch(tokens, amounts, recipient);
+    }
+
+    /**
+     * @notice Pauses all paymaster operations.
+     * @dev Can only be called by an account with the DEFAULT_ADMIN_ROLE.
+     *      When paused, the contract rejects UserOperations and postOp execution.
+     */
+    function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _pause();
+    }
+
+    /**
+     * @notice Resumes paymaster operations after a pause.
+     * @dev Can only be called by an account with the DEFAULT_ADMIN_ROLE.
+     *      Enables UserOperation validation and postOp logic to proceed normally.
+     */
+    function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        _unpause();
     }
 
     function _withdrawTokensBatch(
