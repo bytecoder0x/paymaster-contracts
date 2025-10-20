@@ -8,7 +8,7 @@ import {IStakeManager} from "@account-abstraction/contracts/interfaces/IStakeMan
 import {INonceManager} from "@account-abstraction/contracts/interfaces/INonceManager.sol";
 
 import {ValidationModifiers} from "./ValidationModifiers.sol";
-import {EntryPointNotWhitelisted, EntryPointInterfaceNotSupported, InvalidArray} from "../errors/PaymasterErrors.sol";
+import {EntryPointNotWhitelisted, InvalidArray} from "../errors/PaymasterErrors.sol";
 
 abstract contract StakeManager is ValidationModifiers, AccessControlEnumerable {
     using ERC165Checker for address;
