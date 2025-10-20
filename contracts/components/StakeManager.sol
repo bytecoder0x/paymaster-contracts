@@ -5,7 +5,6 @@ import {AccessControlEnumerable} from "@openzeppelin/contracts/access/extensions
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IEntryPoint} from "@account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {IStakeManager} from "@account-abstraction/contracts/interfaces/IStakeManager.sol";
-import {INonceManager} from "@account-abstraction/contracts/interfaces/INonceManager.sol";
 
 import {ValidationModifiers} from "./ValidationModifiers.sol";
 import {EntryPointNotWhitelisted, InvalidArray} from "../errors/PaymasterErrors.sol";
@@ -20,7 +19,7 @@ abstract contract StakeManager is ValidationModifiers, AccessControlEnumerable {
      */
     event SetEntryPointWhitelistStatus(address entryPoint, bool status);
 
-    /// @notice Maps whitelisted EntryPoint addresses.
+    /// @notice Maps whitelisted EntryPoint addresses. Currently should have only EntryPoints v0.7, v0.8 whitelisted.
     mapping(address => bool) public entryPointWhitelist;
 
     /**
