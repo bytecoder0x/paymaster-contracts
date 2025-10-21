@@ -1,28 +1,25 @@
 import { DeployConfig } from "../types";
+import { entryPoint07Address, entryPoint08Address } from "viem/_types/account-abstraction";
 
 export const DEPLOY_CONSTANTS: Record<string, DeployConfig> = {
   mainnet: {
     owner: "0x0000000000000000000000000000000000000000",
-    operator: "0x0000000000000000000000000000000000000000",
-    entryPoint: {
-      v7: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-      v8: "0x4337084d9e255ff0702461cf8895ce9e3b5ff108",
-    },
+    operator: "0x0000000000000000000000000000000000000000", // prod operator
+    entryPoints: [entryPoint07Address, entryPoint08Address],
+  },
+  polygon: {
+    owner: "0x0000000000000000000000000000000000000000",
+    operator: "0x0000000000000000000000000000000000000000", // prod operator
+    entryPoints: [entryPoint07Address, entryPoint08Address],
   },
   sepolia: {
     owner: "0x0000000000000000000000000000000000000000",
     operator: "0x0000000000000000000000000000000000000000",
-    entryPoint: {
-      v7: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-      v8: "0x4337084d9e255ff0702461cf8895ce9e3b5ff108",
-    },
+    entryPoints: [entryPoint07Address, entryPoint08Address],
   },
   katana: {
     owner: "0x0000000000000000000000000000000000000000",
-    operator: "0x0000000000000000000000000000000000000000",
-    entryPoint: {
-      v7: "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
-      v8: "0x4337084d9e255ff0702461cf8895ce9e3b5ff108",
-    },
+    operator: "0x0000000000000000000000000000000000000000", // prod operator
+    entryPoints: [entryPoint07Address, entryPoint08Address],
   },
 };

@@ -1,3 +1,4 @@
+import { MaxUint256 } from "ethers";
 import { ERC20__factory, IEntryPoint__factory, TokenPaymaster__factory } from "../typechain-types";
 
 const errorData =
@@ -8,12 +9,6 @@ async function main() {
     errorData.toLowerCase(),
   );
   console.log("postOpErrorReason", postOpErrorReason);
-
-  // const parsed = ERC20__factory.createInterface().parseError(errorData);
-  // console.log(parsed);
-
-  // const parsed = ERC20__factory.createInterface().parseError(postOpErrorReason);
-  // console.log(parsed);
 }
 
 main();
