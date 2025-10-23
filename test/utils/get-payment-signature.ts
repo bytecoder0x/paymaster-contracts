@@ -1,7 +1,7 @@
 import { Signature, keccak256 } from "ethers";
 import { TokenPaymaster } from "../../typechain-types";
 import { getCurrentTimestamp } from ".";
-import { SIGNATURE_VALIDITY } from "../constants";
+import { SIGNATURE_VALIDITY, ZERO_BYTES } from "../constants";
 import { network } from "hardhat";
 import { PaymasterPaymentDataStruct } from "../types";
 
@@ -11,7 +11,7 @@ export async function getPaymentSignature(
   userOpCallData: string, // Full userOp.callData to be signed
   user: string, // user address (from userOp.sender)
 ) {
-  const { token, exchangeRate, postOpCost, operator } = paymentStruct;
+  const { token, exchangeRate, postOpCost, operator, opaque = ZERO_BYTES } = paymentStruct;
 
   // Get current nonce for operator-user pair
   const operatorAddress = typeof operator === "string" ? operator : operator.address;
@@ -23,9 +23,6 @@ export async function getPaymentSignature(
 
   // Use provided deadline if available, otherwise use default
   const deadline = paymentStruct.deadline || currentTimestamp + SIGNATURE_VALIDITY;
-
-  // Hash the userOp.callData that will be allowed
-  const callDataHash = keccak256(userOpCallData);
 
   const domain = {
     name: "TokenPaymaster",
@@ -40,9 +37,10 @@ export async function getPaymentSignature(
       { name: "exchangeRate", type: "uint256" },
       { name: "postOpCost", type: "uint256" },
       { name: "user", type: "address" },
-      { name: "callDataHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
       { name: "deadline", type: "uint256" },
+      { name: "callData", type: "bytes" },
+      { name: "opaque", type: "bytes" },
     ],
   };
 
@@ -51,9 +49,10 @@ export async function getPaymentSignature(
     exchangeRate,
     postOpCost,
     user,
-    callDataHash,
     nonce,
     deadline,
+    callData: userOpCallData,
+    opaque,
   };
 
   const signatureString = await operator.signTypedData(domain, types, value);

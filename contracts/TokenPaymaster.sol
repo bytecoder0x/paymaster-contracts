@@ -101,7 +101,6 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
                 TOKEN_PRICE_DENOMINATOR;
         }
 
-
         // Transfer exact token amount from user to paymaster
         // User must have sufficient allowance or include approve in userOp calldata
         IERC20(token).safeTransferFrom(sender, address(this), actualTokenNeeded);
@@ -115,11 +114,19 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
     }
 
+    /**
+     * @notice Sets the collector swapper address that will be used to swap the fee token in postOp.
+     * @param swapper The address of the collector swapper contract.
+     */
     function setCollectorSwapper(address swapper) external nonZeroAddress(swapper) onlyRole(DEFAULT_ADMIN_ROLE) {
         collectorSwapper = ICollectorSwapper(swapper);
         emit CollectorSwapperUpdated(swapper);
     }
 
+    /**
+     * @notice Enables or disables automatic fee token swap in postOp.
+     * @param enabled True to enable swap, false to disable.
+     */
     function setPostOpSwapEnabled(bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
         postOpSwapEnabled = enabled;
         emit PostOpTrySwapEnabledUpdated(enabled);

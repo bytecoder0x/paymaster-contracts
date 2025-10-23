@@ -44,7 +44,6 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
 
         // receive the token from the paymaster
         IERC20(tokenIn).safeTransferFrom(paymaster, address(this), amountIn);
-
         // approve the token to the router
         _approveToken(tokenIn, router, amountIn);
 
@@ -118,9 +117,9 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
             deadline := calldataload(add(opaque.offset, offset))
             offset := add(offset, 32)
 
-            // poolFee (uint24) takes 32 bytes, but we only take the last 3
-            let overriddenPoolFee := shr(232, calldataload(add(opaque.offset, offset)))
-
+            // poolFee (32 bytes)
+            let overriddenPoolFee := calldataload(add(opaque.offset, offset))
+            
             // If overriddenPoolFee != 0 — update poolFee
             if overriddenPoolFee {
                 poolFee := overriddenPoolFee

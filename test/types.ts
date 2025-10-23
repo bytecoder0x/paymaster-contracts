@@ -9,6 +9,7 @@ export interface PaymasterPaymentDataStruct {
   exchangeRate: Uint256;
   postOpCost: Uint256;
   operator: SignerWithAddress;
+  opaque?: BytesLike; // Optional opaque payload for swap (amountOutMin, deadline, poolFee)
   deadline?: Uint256; // Optional deadline for custom expiration tests
 }
 
