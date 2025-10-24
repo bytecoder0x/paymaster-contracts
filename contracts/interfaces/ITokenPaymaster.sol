@@ -13,6 +13,7 @@ import {IPaymaster} from "@account-abstraction/contracts/interfaces/IPaymaster.s
  * @param v ECDSA signature component.
  * @param r ECDSA signature component.
  * @param s ECDSA signature component.
+ * @param opaque The opaque payload for swapper parameters (like amountOutMin, deadline, poolFee).
  */
 struct PaymasterPaymentData {
     address token;
@@ -23,6 +24,7 @@ struct PaymasterPaymentData {
     uint8 v;
     bytes32 r;
     bytes32 s;
+    bytes opaque;
 }
 
 interface ITokenPaymaster is IPaymaster {
@@ -49,4 +51,16 @@ interface ITokenPaymaster is IPaymaster {
      * @param amounts Corresponding token amounts withdrawn.
      */
     event TokensWithdrawn(address indexed recipient, address[] tokens, uint256[] amounts);
+
+    /**
+     * @notice Emitted when the CollectorSwapper address is updated.
+     * @param swapper New CollectorSwapper address.
+     */
+    event CollectorSwapperUpdated(address indexed swapper);
+
+    /**
+     * @notice Emitted when automatic token swapping is enabled/disabled.
+     * @param enabled True if swapping is enabled, false otherwise.
+     */
+    event PostOpTrySwapEnabledUpdated(bool enabled);
 }

@@ -1,13 +1,15 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
+import { setup, approveToPaymaster } from "./utils";
 import { ethers } from "hardhat";
 import {
-  IEntryPoint__factory,
+  IEntryPoint,
   IERC20,
-  IPaymaster,
   SimpleAccount,
-  SimpleAccount__factory,
+  TestCounter,
+  TokenPaymaster,
+  CollectorSwapper,
 } from "../typechain-types";
 import { getPaymentSignature, getUserOp } from "./utils";
 import {
@@ -20,67 +22,44 @@ import {
   ZeroAddress,
   ZeroHash,
 } from "ethers";
-import { FEES, GAS } from "./constants";
+import { ENTRY_POINT_V06, FEES, GAS, ZERO_ADDRESS } from "./constants";
 import { GasLimits, FeePerGas } from "./types";
 
 describe("TokenPaymaster", () => {
+  let paymaster: TokenPaymaster;
+  let entryPointV8: IEntryPoint;
+  let entryPointV7: IEntryPoint;
+  let collectorSwapper: CollectorSwapper;
+  let usdc: IERC20;
+  let sender: SimpleAccount;
+  let targetContract: TestCounter;
   let deployer: SignerWithAddress;
   let operator: SignerWithAddress;
   let userSigner: HDNodeWallet;
   let beneficiary: SignerWithAddress;
   let alice: SignerWithAddress;
+  let binanceHotWallet: SignerWithAddress;
 
-  const ENTRY_POINT_V06 = "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789";
-  const ENTRY_POINT_V07 = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
-  const ENTRY_POINT_V08 = "0x4337084d9e255ff0702461cf8895ce9e3b5ff108";
+  beforeEach(async () => {
+    const fixture = await loadFixture(setup);
 
-  const setup = async () => {
-    [deployer, operator, beneficiary, alice] = await ethers.getSigners();
-    userSigner = Wallet.createRandom(deployer.provider);
-
-    const entryPointV8 = IEntryPoint__factory.connect(ENTRY_POINT_V08, deployer);
-    const entryPointV7 = IEntryPoint__factory.connect(ENTRY_POINT_V07, deployer);
-
-    const accountFactory = await ethers.deployContract("SimpleAccountFactory", [entryPointV8]);
-    const tx = await accountFactory.createAccount(userSigner, 123n);
-    const res = await tx.wait();
-    const sender = SimpleAccount__factory.connect((res?.logs[3] as EventLog).args[0], userSigner);
-
-    const paymaster = await ethers.deployContract("TokenPaymaster", [
-      deployer,
-      operator,
-      [ENTRY_POINT_V07, ENTRY_POINT_V08],
-    ]);
-    await Promise.all([
-      await entryPointV7.depositTo(paymaster, { value: parseUnits("100") }),
-      await entryPointV8.depositTo(paymaster, { value: parseUnits("100") }),
-      await paymaster.addStake(entryPointV7, 1, { value: parseUnits("100") }),
-      await paymaster.addStake(entryPointV8, 1, { value: parseUnits("100") }),
-    ]);
-
-    const usdc = await ethers.deployContract("MockERC20");
-    const targetContract = await ethers.deployContract("TestCounter");
-
-    await usdc.transfer(sender, parseUnits("1000000", 6));
-
-    return { paymaster, usdc, entryPointV7, entryPointV8, sender, targetContract };
-  };
-
-  const approveToPaymaster = async (owner: SimpleAccount, paymaster: IPaymaster, token: IERC20) => {
-    const approveData = token.interface.encodeFunctionData("approve", [
-      paymaster.target.toString(),
-      MaxUint256,
-    ]);
-    await deployer.sendTransaction({
-      to: userSigner,
-      value: parseUnits("0.1"),
-    });
-    await owner.execute(token, 0n, approveData);
-  };
+    paymaster = fixture.paymaster;
+    entryPointV8 = fixture.entryPointV8;
+    entryPointV7 = fixture.entryPointV7;
+    collectorSwapper = fixture.collectorSwapper;
+    usdc = fixture.usdc;
+    sender = fixture.sender;
+    targetContract = fixture.targetContract;
+    deployer = fixture.deployer;
+    operator = fixture.operator;
+    beneficiary = fixture.beneficiary;
+    alice = fixture.alice;
+    userSigner = fixture.userSigner;
+    binanceHotWallet = fixture.binanceHotWallet;
+  });
 
   describe("validatePaymasterUserOp", function () {
     it("should be called only by whitelisted EntryPoint", async () => {
-      const { paymaster, entryPointV8, sender } = await loadFixture(setup);
       const userOp = {
         sender,
         nonce: await entryPointV8.getNonce(sender, 0),
@@ -99,8 +78,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert if paymaster data has wrong length", async () => {
-      const { paymaster, entryPointV8, sender, targetContract } = await loadFixture(setup);
-
       // Test with too short data (only paymaster address + gas limits, no PaymasterPaymentData)
       const userOp = await getUserOp(
         entryPointV8,
@@ -119,56 +96,9 @@ describe("TokenPaymaster", () => {
           "AA33 reverted",
           paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [52]),
         );
-
-      // Test with too long data (add extra bytes beyond expected 276)
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: await ethers.getContractAt(
-          "MockERC20",
-          "0x0000000000000000000000000000000000000001",
-        ), // Non-zero for encoding
-        exchangeRate: BigInt(1),
-        postOpCost: 123n,
-        operator,
-      };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-
-      const validUserOp = await getUserOp(
-        entryPointV8,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      // Add extra bytes to make it longer than expected 276
-      validUserOp.paymasterAndData += Buffer.from(randomBytes(20)).toString("hex");
-
-      await expect(entryPointV8.handleOps([validUserOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
-        .withArgs(
-          0,
-          "AA33 reverted",
-          paymaster.interface.encodeErrorResult("InvalidPaymasterAndDataLength", [328]),
-        );
     });
 
     it("should revert if wrong operator signature", async () => {
-      const { paymaster, entryPointV8, sender, usdc, targetContract } = await loadFixture(setup);
-
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
@@ -209,9 +139,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert if out of gas", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const exchangeRate = BigInt(4e8);
       const postOpCost = 30000n;
@@ -267,9 +195,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("CALLDATA: should validate callDataHash correctly", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -313,9 +239,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("CALLDATA: should reject mismatched callData", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const differentCallData = targetContract.interface.encodeFunctionData("justEmit");
@@ -360,9 +284,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("CALLDATA + NONCE: should prevent replay attacks with same callData", async function () {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       // Test nonce replay protection
@@ -424,7 +346,6 @@ describe("TokenPaymaster", () => {
 
   describe("postOp", async () => {
     it("should be called only by whitelisted EntryPoint", async () => {
-      const { paymaster } = await loadFixture(setup);
       const tx = paymaster.postOp(0, "0xdeadbeef", 124, 22222);
       await expect(tx)
         .to.be.revertedWithCustomError(paymaster, "EntryPointNotWhitelisted")
@@ -432,9 +353,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should transfer exact token amount in postOp", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
@@ -481,8 +400,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should emit postOp revert event if insufficient allowance", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
       const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -529,14 +446,12 @@ describe("TokenPaymaster", () => {
       const parsed = usdc.interface.parseError(postOpErrorReason);
 
       expect(parsed).to.not.be.null;
-      expect(parsed?.name).to.equal("ERC20InsufficientAllowance");
-      expect(parsed?.args[0]).to.equal(paymaster.target.toString());
+      expect(parsed?.name).to.equal("Error");
+      expect(parsed?.args[0]).to.equal('ERC20: transfer amount exceeds allowance');
     });
 
     it("should emit event", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
@@ -597,8 +512,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should be called only by default admin", async () => {
-      const { paymaster, entryPointV7, entryPointV8 } = await loadFixture(setup);
-
       await expect(paymaster.connect(alice).withdrawTo(entryPointV7, alice, 123))
         .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
         .withArgs(alice.address, ZeroHash);
@@ -617,8 +530,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert if EntryPoint is not whitelisted", async () => {
-      const { paymaster } = await loadFixture(setup);
-
       await expect(paymaster.deposit(ENTRY_POINT_V06, { value: 123 }))
         .to.be.revertedWithCustomError(paymaster, "EntryPointNotWhitelisted")
         .withArgs(ENTRY_POINT_V06);
@@ -629,8 +540,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should deposit to EntryPoint", async () => {
-      const { paymaster, entryPointV8 } = await loadFixture(setup);
-
       const initialDeposit = await paymaster.getDeposit(entryPointV8);
       const depositAmount = parseUnits("1");
 
@@ -641,8 +550,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should withdraw from EntryPoint", async () => {
-      const { paymaster, entryPointV7 } = await loadFixture(setup);
-
       await paymaster.deposit(entryPointV7, { value: parseUnits("2") });
       const initialBalance = await ethers.provider.getBalance(beneficiary);
 
@@ -653,16 +560,12 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert withdrawTo with zero address", async () => {
-      const { paymaster, entryPointV7 } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawTo(entryPointV7, ZeroAddress, parseUnits("1")),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
     it("should unlock stake", async () => {
-      const { paymaster, entryPointV8 } = await loadFixture(setup);
-
       await paymaster.unlockStake(entryPointV8);
 
       const stakeInfo = await paymaster.getStakeInfo(entryPointV8);
@@ -670,8 +573,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should withdraw stake", async () => {
-      const { paymaster, entryPointV7 } = await loadFixture(setup);
-
       // First unlock, then wait and withdraw
       await paymaster.unlockStake(entryPointV7);
 
@@ -687,16 +588,12 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert withdrawStake with zero address", async () => {
-      const { paymaster, entryPointV8 } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawStake(entryPointV8, ZeroAddress),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
     it("should get stake info", async () => {
-      const { paymaster, entryPointV7 } = await loadFixture(setup);
-
       const stakeInfo = await paymaster.getStakeInfo(entryPointV7);
       expect(stakeInfo.depositAmount).to.be.gt(0);
       expect(stakeInfo.staked).to.be.true;
@@ -704,8 +601,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should allow whitelist and de-whitelist EntryPoints", async () => {
-      const { paymaster, entryPointV7 } = await loadFixture(setup);
-
       await paymaster.setEntryPointWhitelist(entryPointV7, false);
       expect(await paymaster.entryPointWhitelist(entryPointV7)).to.be.false;
 
@@ -721,8 +616,6 @@ describe("TokenPaymaster", () => {
 
   describe("Pause functionality", () => {
     it("should pause and unpause", async () => {
-      const { paymaster } = await loadFixture(setup);
-
       await paymaster.pause();
       expect(await paymaster.paused()).to.be.true;
 
@@ -731,10 +624,8 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert operations when paused", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
       await paymaster.pause();
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -773,8 +664,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should only allow admin to pause/unpause", async () => {
-      const { paymaster } = await loadFixture(setup);
-
       await expect(paymaster.connect(operator).pause())
         .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
         .withArgs(operator.address, ZeroHash);
@@ -785,11 +674,19 @@ describe("TokenPaymaster", () => {
     });
   });
 
+  describe("CollectorSwapper functionality", () => {
+    it("should set collector swapper and post op try swap enabled", async () => {
+      await paymaster.setCollectorSwapper(collectorSwapper.target.toString());
+      expect(await paymaster.collectorSwapper()).to.equal(collectorSwapper.target.toString());
+
+      await paymaster.setPostOpSwapEnabled(true);
+      expect(await paymaster.postOpSwapEnabled()).to.be.true;
+    });
+  });
+
   describe("EIP712Service edge cases", () => {
     it("should fail validation with expired deadline", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       // Get current blockchain timestamp and set deadline in the past
       const currentBlock = await ethers.provider.getBlock("latest");
@@ -833,9 +730,7 @@ describe("TokenPaymaster", () => {
     });
 
     it("should fail validation with invalid operator", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       // Use unauthorized signer (beneficiary instead of operator)
       const callData = targetContract.interface.encodeFunctionData("count");
@@ -876,9 +771,7 @@ describe("TokenPaymaster", () => {
 
   describe("Additional coverage tests", () => {
     it("should handle failed operations without refund", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
-      await approveToPaymaster(sender, paymaster, usdc);
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       // Create a call that will fail - use countFail function
       const failingCallData = targetContract.interface.encodeFunctionData("countFail");
@@ -917,11 +810,9 @@ describe("TokenPaymaster", () => {
     });
 
     it("should withdraw tokens with max amount", async () => {
-      const { paymaster, usdc } = await loadFixture(setup);
-
       // Transfer some tokens to paymaster first
       const transferAmount = parseUnits("1000", 6);
-      await usdc.transfer(paymaster.target.toString(), transferAmount);
+      await usdc.connect(binanceHotWallet).transfer(paymaster.target.toString(), transferAmount);
 
       const initialBalance = await usdc.balanceOf(deployer.address);
 
@@ -942,15 +833,14 @@ describe("TokenPaymaster", () => {
     });
 
     it("should withdraw batch tokens successfully", async () => {
-      const { paymaster, usdc } = await loadFixture(setup);
-
       // Deploy second mock token
       const usdt = await ethers.deployContract("MockERC20");
 
       // Transfer tokens to paymaster
       const transferAmount1 = parseUnits("1000", 6);
       const transferAmount2 = parseUnits("500", 6);
-      await usdc.transfer(paymaster.target.toString(), transferAmount1);
+
+      await usdc.connect(binanceHotWallet).transfer(paymaster.target.toString(), transferAmount1);
       await usdt.transfer(paymaster.target.toString(), transferAmount2);
 
       const initialBalance1 = await usdc.balanceOf(deployer.address);
@@ -980,8 +870,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert batch withdraw with array length mismatch", async () => {
-      const { paymaster, usdc } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawTokensBatch(
           [usdc.target.toString()],
@@ -992,16 +880,12 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert batch withdraw with empty arrays", async () => {
-      const { paymaster } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawTokensBatch([], [], deployer.address),
       ).to.be.revertedWithCustomError(paymaster, "ZeroUint256");
     });
 
     it("should revert batch withdraw with zero token address", async () => {
-      const { paymaster } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawTokensBatch(
           ["0x0000000000000000000000000000000000000000"],
@@ -1012,8 +896,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert single withdraw with zero token address", async () => {
-      const { paymaster } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawTokens(
           "0x0000000000000000000000000000000000000000",
@@ -1024,8 +906,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("withdraw operations should revert if recipient zero address", async () => {
-      const { paymaster, usdc } = await loadFixture(setup);
-
       await expect(
         paymaster.withdrawTokens(usdc, ZeroAddress, parseUnits("100", 6)),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
@@ -1036,8 +916,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should revert single withdraw with zero amount", async () => {
-      const { paymaster, usdc } = await loadFixture(setup);
-
       await expect(paymaster.withdrawTokens(usdc, deployer, 0)).to.be.revertedWithCustomError(
         paymaster,
         "ZeroUint256",
@@ -1045,8 +923,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("withdraw operations should be done only by default admin", async () => {
-      const { paymaster, usdc } = await loadFixture(setup);
-
       await expect(paymaster.connect(beneficiary).withdrawTokens(usdc, beneficiary, 123))
         .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
         .withArgs(beneficiary.address, ZeroHash);
@@ -1058,10 +934,23 @@ describe("TokenPaymaster", () => {
         .withArgs(beneficiary.address, ZeroHash);
     });
 
-    it("should test ECDSA recovery error handling", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
+    it("set collector swapper or post op swap enabled should be done only by default admin", async () => {
+      await expect(paymaster.connect(beneficiary).setCollectorSwapper(collectorSwapper.target.toString()))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
 
-      await approveToPaymaster(sender, paymaster, usdc);
+      await expect(paymaster.connect(beneficiary).setPostOpSwapEnabled(true))
+        .to.be.revertedWithCustomError(paymaster, "AccessControlUnauthorizedAccount")
+        .withArgs(beneficiary.address, ZeroHash);
+    });
+
+    it("should revert if try to set collector swapper zero address", async () => {
+      await expect(paymaster.setCollectorSwapper(ZERO_ADDRESS))
+        .to.be.revertedWithCustomError(paymaster, "ZeroAddress");
+    });
+
+    it("should test ECDSA recovery error handling", async () => {
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
 
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
@@ -1102,8 +991,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should fail with zero token address", async () => {
-      const { paymaster, sender, entryPointV8, targetContract } = await loadFixture(setup);
-
       // Create a mock token with zero address
       const zeroToken = await ethers.getContractAt(
         "MockERC20",
@@ -1146,8 +1033,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should fail with zero token price", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,
@@ -1184,8 +1069,6 @@ describe("TokenPaymaster", () => {
     });
 
     it("should fail with zero postOp cost", async () => {
-      const { paymaster, sender, usdc, entryPointV8, targetContract } = await loadFixture(setup);
-
       const callData = targetContract.interface.encodeFunctionData("count");
       const paymentStruct = {
         token: usdc,

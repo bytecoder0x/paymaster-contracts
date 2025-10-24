@@ -1,4 +1,5 @@
-import { AbiCoder, BytesLike, getBytes, HDNodeWallet, solidityPacked } from "ethers";
+import { AbiCoder, BytesLike, ethers, getBytes, HDNodeWallet, solidityPacked } from "ethers";
+import { ZERO_BYTES } from "../constants";
 import { IPaymaster, SimpleAccount } from "../../typechain-types";
 import { PackedUserOperationStruct } from "../../typechain-types/contracts/TokenPaymaster";
 import { FeePerGas, GasLimits, PaymasterPaymentDataStructSigned } from "../types";
@@ -56,7 +57,7 @@ function encodePaymasterAndData(
   paymasterVerificationGas: Uint256,
   paymasterPostOpGas: Uint256,
 ): string {
-  const { token, exchangeRate, postOpCost, nonce, deadline, v, r, s } = data;
+  const { token, exchangeRate, postOpCost, opaque = ZERO_BYTES, nonce, deadline, v, r, s } = data;
 
   // Temporarily use original uint256 encoding to debug signature issue
   const encodedStruct = AbiCoder.defaultAbiCoder().encode(
@@ -69,8 +70,9 @@ function encodePaymasterAndData(
       "uint8", // v
       "bytes32", // r
       "bytes32", // s
+      "bytes", // opaque
     ],
-    [token.target.toString(), exchangeRate, postOpCost, nonce, deadline, v, r, s],
+    [token.target.toString(), exchangeRate, postOpCost, nonce, deadline, v, r, s, opaque],
   );
 
   return solidityPacked(

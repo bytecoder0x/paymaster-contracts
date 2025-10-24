@@ -16,9 +16,9 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
      */
     mapping(address => mapping(address => uint256)) public operatorUserNonces;
 
-    /// @dev keccak256("PaymasterPaymentData(address token,uint256 exchangeRate,uint256 postOpCost,address user,bytes32 callDataHash,uint256 nonce,uint256 deadline)")
+    /// @dev keccak256("PaymasterPaymentData(address token,uint256 exchangeRate,uint256 postOpCost,address user,uint256 nonce,uint256 deadline,bytes callData,bytes opaque)")
     bytes32 public constant PAYMASTER_PAYMENT_TYPEHASH =
-        0x5d1d1535d2d191dd7ae7ad33fbfa51e916ae07650ca5da8a7c02894ba9a35bd0;
+        0x50d0575c1a3755ed812e908e6fc78af4cdb9ee45262e5a66b95060ebfed8fb27;
 
     /// @dev keccak256("OPERATOR_ROLE")
     bytes32 public constant OPERATOR_ROLE = 0x97667070c54ef182b0f5858b034beac1b6f3089aa2d3188bb1e8929f4fa9b929;
@@ -47,9 +47,6 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
             return SIG_VALIDATION_FAILED;
         }
 
-        // Create callDataHash for validation
-        bytes32 callDataHash = keccak256(callData);
-
         // Encode data that was signed by operator
         bytes memory encodedData = abi.encode(
             PAYMASTER_PAYMENT_TYPEHASH,
@@ -57,9 +54,10 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
             param.exchangeRate,
             param.postOpCost,
             from, // user address (from userOp.sender)
-            callDataHash, // callData hash (computed from userOp.callData)
             param.nonce,
-            param.deadline
+            param.deadline,
+            keccak256(callData),
+            keccak256(param.opaque)
         );
 
         bytes32 digest = _hashTypedDataV4(keccak256(encodedData));

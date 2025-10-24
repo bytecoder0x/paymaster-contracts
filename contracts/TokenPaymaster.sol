@@ -9,17 +9,30 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IPaymaster} from "@account-abstraction/contracts/interfaces/IPaymaster.sol";
 
 import {ITokenPaymaster, PaymasterPaymentData} from "./interfaces/ITokenPaymaster.sol";
+import {ICollectorSwapper} from "./interfaces/ICollectorSwapper.sol";
+import {ApproveManager} from "./components/ApproveManager.sol";
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {ValidationModifiers} from "./components/ValidationModifiers.sol";
 import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
 
-contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, Pausable {
+
+contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, ApproveManager, Pausable {
     using SafeERC20 for IERC20;
 
-    uint256 private constant CONTEXT_LENGTH = 136;
-    uint256 private constant PAYMASTER_DATA_LENGTH = 308; // 20 + 32 + 256 bytes (paymaster address + gas limits + PaymasterPaymentData)
+    /// @dev context length has at least 136 without opaque part
+    uint256 private constant MIN_CONTEXT_LENGTH = 136;
+    /// @dev paymaster data length has at least 372 bytes without opaque part
+    /// where 20 + 32 (paymaster address) + 32 (gas limits) + 320 (64 - opaque part if zero bytes) (PaymasterPaymentData)
+    uint256 private constant MIN_PAYMASTER_DATA_LENGTH = 372; 
+
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
+
+    /// @notice Address of the contract that will handle the swap for token fee
+    ICollectorSwapper public collectorSwapper;
+
+    /// @notice Flag to enable/disable automatic fee token swap in postOp
+    bool public postOpSwapEnabled;
 
     /**
      * @notice Initializes the TokenPaymaster with the admin, operator, EntryPoint.
@@ -51,28 +64,35 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         address token;
         uint256 exchangeRate;
         uint256 postOpCost;
+        bytes memory opaque;
 
-        (token, exchangeRate, postOpCost, validationData) = _validateAndDecodePaymasterAndData(userOp);
+        (token, exchangeRate, postOpCost, opaque, validationData) = _validateAndDecodePaymasterAndData(userOp);
         if (validationData == SIG_VALIDATION_FAILED) return (bytes(""), SIG_VALIDATION_FAILED);
 
-        context = abi.encodePacked(token, exchangeRate, postOpCost, userOp.sender, userOpHash);
+        context = abi.encodePacked(token, exchangeRate, postOpCost, userOp.sender, userOpHash, opaque);
         validationData = SIG_VALIDATION_SUCCESS;
     }
 
     /// @inheritdoc IPaymaster
-    /// @dev Transfers exact token amount based on actual gas usage.
+    /// @dev Transfers exact token amount based on actual gas usage and swap fee token if enabled.
     /// No pre-funding or refunds - user pays only what was actually consumed.
+    /// Follows checks-effects-interactions pattern to prevent re-entrancy attacks.
     function postOp(
         PostOpMode /* mode */,
         bytes calldata context,
         uint256 actualGasCost,
         uint256 actualUserOpFeePerGas
     ) external onlySupportedEntryPoint(msg.sender) whenNotPaused {
-        if (context.length != CONTEXT_LENGTH) revert InvalidPostOpContextLength(context.length);
+        if (context.length < MIN_CONTEXT_LENGTH) revert InvalidPostOpContextLength(context.length);
 
-        (address token, uint256 exchangeRate, uint256 postOpCost, address sender, bytes32 userOpHash) = _parseContext(
-            context
-        );
+        (
+            address token,
+            uint256 exchangeRate,
+            uint256 postOpCost,
+            address sender,
+            bytes32 userOpHash,
+            bytes memory opaque
+        ) = _parseContext(context);
 
         // Calculate exact token amount needed based on actual gas consumption
         uint256 actualTokenNeeded;
@@ -82,11 +102,40 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
                 TOKEN_PRICE_DENOMINATOR;
         }
 
+        // Cache storage read for gas optimization and cleaner code
+        ICollectorSwapper swapper = collectorSwapper;
+        bool shouldSwap = postOpSwapEnabled && address(swapper) != address(0) && swapper.isTokenEnabled(token);
+
+        // Emit event BEFORE external calls (CEI pattern)
+        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
+
         // Transfer exact token amount from user to paymaster
         // User must have sufficient allowance or include approve in userOp calldata
         IERC20(token).safeTransferFrom(sender, address(this), actualTokenNeeded);
 
-        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
+        // If swap is enabled and the token is supported, swap the token
+        if (shouldSwap) {
+            _approveToken(token, address(swapper), actualTokenNeeded);
+            swapper.postOpHandle(opaque, token, actualTokenNeeded);
+        }
+    }
+
+    /**
+     * @notice Sets the collector swapper address that will be used to swap the fee token in postOp.
+     * @param swapper The address of the collector swapper contract.
+     */
+    function setCollectorSwapper(address swapper) external nonZeroAddress(swapper) onlyRole(DEFAULT_ADMIN_ROLE) {
+        collectorSwapper = ICollectorSwapper(swapper);
+        emit CollectorSwapperUpdated(swapper);
+    }
+
+    /**
+     * @notice Enables or disables automatic fee token swap in postOp.
+     * @param enabled True to enable swap, false to disable.
+     */
+    function setPostOpSwapEnabled(bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        postOpSwapEnabled = enabled;
+        emit PostOpTrySwapEnabledUpdated(enabled);
     }
 
     /**
@@ -180,46 +229,85 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     )
         private
         pure
-        returns (address token, uint256 exchangeRate, uint256 postOpCost, address sender, bytes32 userOpHash)
+        returns (
+            address token,
+            uint256 exchangeRate,
+            uint256 postOpCost,
+            address sender,
+            bytes32 userOpHash,
+            bytes memory opaque
+        )
     {
+        uint256 offset = 0;
+
         assembly {
-            let offset := context.offset
+            // address token (20 bytes)
+            token := shr(96, calldataload(add(context.offset, offset)))
+            offset := add(offset, 20)
 
-            // 0–19: address token (right-aligned in 32 bytes)
-            token := shr(96, calldataload(offset))
+            // uint256 exchangeRate (32 bytes)
+            exchangeRate := calldataload(add(context.offset, offset))
+            offset := add(offset, 32)
 
-            // 20–51: uint256 exchangeRate (starts immediately after 20 bytes)
-            exchangeRate := calldataload(add(offset, 20))
+            // uint256 postOpCost (32 bytes)
+            postOpCost := calldataload(add(context.offset, offset))
+            offset := add(offset, 32)
 
-            // 52–83: uint256 postOpCost
-            postOpCost := calldataload(add(offset, 52))
+            // address sender (20 bytes)
+            sender := shr(96, calldataload(add(context.offset, offset)))
+            offset := add(offset, 20)
 
-            // 84–103: address sender
-            sender := shr(96, calldataload(add(offset, 84)))
-
-            // 104–135: bytes32 userOpHash
-            userOpHash := calldataload(add(offset, 104))
+            // bytes32 userOpHash (32 bytes)
+            userOpHash := calldataload(add(context.offset, offset))
+            offset := add(offset, 32)
         }
+
+        // Get the opaque payload from the context
+        opaque = context[offset:];
     }
 
     function _validateAndDecodePaymasterAndData(
         PackedUserOperation calldata userOp
-    ) private returns (address token, uint256 exchangeRate, uint256 postOpCost, uint256 validationData) {
-        // Validate exact paymaster data length for fixed PaymasterPaymentData structure
-        if (userOp.paymasterAndData.length != PAYMASTER_DATA_LENGTH) {
+    ) private returns (address, uint256, uint256, bytes memory, uint256) {
+        // Validate exact paymaster data length for PaymasterPaymentData structure
+        if (userOp.paymasterAndData.length < MIN_PAYMASTER_DATA_LENGTH) {
             revert InvalidPaymasterAndDataLength(userOp.paymasterAndData.length);
         }
 
-        // Decode PaymasterPaymentData from fixed offset
-        PaymasterPaymentData memory paymentData = abi.decode(
-            userOp.paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:],
-            (PaymasterPaymentData)
+        // Decode PaymasterPaymentData from fixed offset but without the opaque part
+        // We cannot decode directly with a trailing `bytes` argument here like opaque because after shifting
+        // to UserOperationLib.PAYMASTER_DATA_OFFSET offsets - for dynamic types (like `bytes`) would be invalid.
+        (
+            address token,
+            uint256 exchangeRate,
+            uint256 postOpCost,
+            uint256 nonce,
+            uint256 deadline,
+            uint8 v,
+            bytes32 r,
+            bytes32 s
+        ) = abi.decode(
+                userOp.paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:],
+                (address, uint256, uint256, uint256, uint256, uint8, bytes32, bytes32)
+            );
+
+        // MIN_PAYMASTER_DATA_LENGTH is the offset of the opaque part
+        bytes memory opaque = userOp.paymasterAndData[MIN_PAYMASTER_DATA_LENGTH:];
+
+        PaymasterPaymentData memory paymentData = PaymasterPaymentData(
+            token,
+            exchangeRate,
+            postOpCost,
+            nonce,
+            deadline,
+            v,
+            r,
+            s,
+            opaque
         );
 
-        validationData = _validatePaymentSignature(userOp.sender, paymentData, userOp.callData);
+        uint256 validationData = _validatePaymentSignature(userOp.sender, paymentData, userOp.callData);
 
-        token = paymentData.token;
-        exchangeRate = paymentData.exchangeRate;
-        postOpCost = paymentData.postOpCost;
+        return (token, exchangeRate, postOpCost, opaque, validationData);
     }
 }
