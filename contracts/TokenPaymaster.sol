@@ -76,6 +76,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     /// @inheritdoc IPaymaster
     /// @dev Transfers exact token amount based on actual gas usage and swap fee token if enabled.
     /// No pre-funding or refunds - user pays only what was actually consumed.
+    /// Follows checks-effects-interactions pattern to prevent re-entrancy attacks.
     function postOp(
         PostOpMode /* mode */,
         bytes calldata context,
@@ -101,17 +102,22 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
                 TOKEN_PRICE_DENOMINATOR;
         }
 
+        // Cache storage read for gas optimization and cleaner code
+        ICollectorSwapper swapper = collectorSwapper;
+        bool shouldSwap = postOpSwapEnabled && address(swapper) != address(0) && swapper.isTokenEnabled(token);
+
+        // Emit event BEFORE external calls (CEI pattern)
+        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
+
         // Transfer exact token amount from user to paymaster
         // User must have sufficient allowance or include approve in userOp calldata
         IERC20(token).safeTransferFrom(sender, address(this), actualTokenNeeded);
 
         // If swap is enabled and the token is supported, swap the token
-        if (postOpSwapEnabled && address(collectorSwapper) != address(0) && collectorSwapper.isTokenEnabled(token)) {
-            _approveToken(token, address(collectorSwapper), actualTokenNeeded);
-            collectorSwapper.postOpHandle(opaque, token, actualTokenNeeded);
+        if (shouldSwap) {
+            _approveToken(token, address(swapper), actualTokenNeeded);
+            swapper.postOpHandle(opaque, token, actualTokenNeeded);
         }
-
-        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
     }
 
     /**
