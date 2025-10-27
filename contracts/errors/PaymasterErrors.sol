@@ -40,3 +40,8 @@ error ArrayLengthMismatch(uint256 tokensLength, uint256 amountsLength);
  * @notice Reverts if an input array is malformed, empty, or otherwise invalid.
  */
 error InvalidArray();
+
+/**
+ * @notice Reverts if the batch withdraw arrays exceed the maximum allowed length.
+ */
+error BatchWithdrawArrayTooLong();

@@ -14,7 +14,7 @@ import {ApproveManager} from "./components/ApproveManager.sol";
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {ValidationModifiers} from "./components/ValidationModifiers.sol";
-import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress} from "./errors/PaymasterErrors.sol";
+import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress, BatchWithdrawArrayTooLong} from "./errors/PaymasterErrors.sol";
 
 
 contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, ApproveManager, Pausable {
@@ -27,6 +27,9 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
     uint256 private constant MIN_PAYMASTER_DATA_LENGTH = 372; 
 
     uint256 private constant TOKEN_PRICE_DENOMINATOR = 1e18;
+    
+    /// @dev Maximum allowed length for batch withdraw arrays
+    uint256 private constant MAX_BATCH_WITHDRAW_LENGTH = 20;
 
     /// @notice Address of the contract that will handle the swap for token fee
     ICollectorSwapper public collectorSwapper;
@@ -193,6 +196,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         uint256[] memory amounts,
         address recipient
     ) private nonZeroUint256(tokens.length) {
+        if (tokens.length > MAX_BATCH_WITHDRAW_LENGTH) revert BatchWithdrawArrayTooLong();
         if (tokens.length != amounts.length) revert ArrayLengthMismatch(tokens.length, amounts.length);
 
         // Arrays to store actual withdrawn data for event
