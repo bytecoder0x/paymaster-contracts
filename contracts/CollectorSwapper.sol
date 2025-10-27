@@ -37,7 +37,7 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
     ///      Emits SwapSucceeded or SwapFailed events for monitoring and off-chain tracking.
     function postOpHandle(bytes calldata opaque, address tokenIn, uint256 amountIn) external onlyPaymaster {
         // Validate the post-op handle
-        if (!_valdiatePostOpHandle(opaque, tokenIn, amountIn)) return;
+        if (!_validatePostOpHandle(opaque, tokenIn, amountIn)) return;
 
         // Parse the opaque payload
         (uint256 amountOutMin, uint256 deadline, uint24 poolFee) = _parseOpaque(opaque, tokenIn);
@@ -59,7 +59,7 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         }
     }
 
-    function _valdiatePostOpHandle(
+    function _validatePostOpHandle(
         bytes calldata opaque,
         address tokenIn,
         uint256 amountIn
