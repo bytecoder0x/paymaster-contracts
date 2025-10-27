@@ -14,7 +14,7 @@ import {ApproveManager} from "./components/ApproveManager.sol";
 import {StakeManager} from "./components/StakeManager.sol";
 import {EIP712Service} from "./components/EIP712Service.sol";
 import {ValidationModifiers} from "./components/ValidationModifiers.sol";
-import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress, BatchWithdrawArrayTooLong} from "./errors/PaymasterErrors.sol";
+import {InvalidPostOpContextLength, InvalidPaymasterAndDataLength, ArrayLengthMismatch, ZeroAddress, BatchWithdrawArrayTooLong, ZeroUint256} from "./errors/PaymasterErrors.sol";
 
 
 contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, EIP712Service, ApproveManager, Pausable {
@@ -207,8 +207,9 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             IERC20 token = tokens[i];
             uint256 amount = amounts[i];
 
-            // Validate token address is not zero
+            // Validate token address is not zero and amount is not zero
             if (address(token) == address(0)) revert ZeroAddress();
+            if (amount == 0) revert ZeroUint256();
 
             // Handle max amount case
             if (amount == type(uint256).max) {
@@ -219,10 +220,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             withdrawnTokens[i] = address(token);
             withdrawnAmounts[i] = amount;
 
-            // Only transfer if amount > 0
-            if (amount > 0) {
-                token.safeTransfer(recipient, amount);
-            }
+            token.safeTransfer(recipient, amount);
         }
 
         emit TokensWithdrawn(recipient, withdrawnTokens, withdrawnAmounts);

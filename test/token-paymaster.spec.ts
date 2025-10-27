@@ -565,19 +565,6 @@ describe("TokenPaymaster", () => {
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
     });
 
-    it("should revert if batch withdraw array length exceeds max allowed length", async () => {
-      const tokens = Array.from({ length: 21 }, () => usdc.target.toString());
-      const amounts = Array.from({ length: 21 }, () => parseUnits("100", 6));
-
-      await expect(
-        paymaster.withdrawTokensBatch(
-          tokens,
-          amounts,
-          deployer.address,
-        ),
-      ).to.be.revertedWithCustomError(paymaster, "BatchWithdrawArrayTooLong");
-    });
-
     it("should unlock stake", async () => {
       await paymaster.unlockStake(entryPointV8);
 
@@ -906,6 +893,25 @@ describe("TokenPaymaster", () => {
           deployer.address,
         ),
       ).to.be.revertedWithCustomError(paymaster, "ZeroAddress");
+    });
+
+    it("should revert if batch withdraw with zero amount", async () => {
+      await expect(
+        paymaster.withdrawTokensBatch([usdc], [0], deployer.address),
+      ).to.be.revertedWithCustomError(paymaster, "ZeroUint256");
+    });
+
+    it("should revert if batch withdraw array length exceeds max allowed length", async () => {
+      const tokens = Array.from({ length: 21 }, () => usdc.target.toString());
+      const amounts = Array.from({ length: 21 }, () => parseUnits("100", 6));
+
+      await expect(
+        paymaster.withdrawTokensBatch(
+          tokens,
+          amounts,
+          deployer.address,
+        ),
+      ).to.be.revertedWithCustomError(paymaster, "BatchWithdrawArrayTooLong");
     });
 
     it("should revert single withdraw with zero token address", async () => {
