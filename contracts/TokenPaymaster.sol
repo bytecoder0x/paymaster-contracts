@@ -100,9 +100,9 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
         // Calculate exact token amount needed based on actual gas consumption
         uint256 actualTokenNeeded;
         unchecked {
-            actualTokenNeeded =
-                ((actualGasCost + postOpCost * actualUserOpFeePerGas) * exchangeRate) /
-                TOKEN_PRICE_DENOMINATOR;
+            uint256 numerator = (actualGasCost + postOpCost * actualUserOpFeePerGas) * exchangeRate;
+            // Ceiling division: (a + b - 1) / b rounds up
+            actualTokenNeeded = (numerator + TOKEN_PRICE_DENOMINATOR - 1) / TOKEN_PRICE_DENOMINATOR;
         }
 
         // Cache storage read for gas optimization and cleaner code
