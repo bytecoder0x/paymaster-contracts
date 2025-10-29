@@ -8,18 +8,27 @@ import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.s
 import { ISwapRouter } from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
 
 import { ZeroAddress } from "../errors/PaymasterErrors.sol";
-import { InvalidTokenConfig, Unauthorized } from "../errors/CollectorSwapperErrors.sol";
+import { InvalidTokenConfig, Unauthorized, InvalidSlippage } from "../errors/CollectorSwapperErrors.sol";
 import { ICollectorSwapper } from "../interfaces/ICollectorSwapper.sol";
 
 abstract contract StorageCollectorSwapper is ICollectorSwapper, AccessControl, Pausable {
     using SafeERC20 for IERC20;
 
+    /// @notice The basis points for correct slippage calculation
+    uint256 public constant MAX_BIPS = 100_00;
+
+    /// @notice The default slippage in basis points
+    uint256 public slippageBps = 2_00; // 2%
+
     /// @notice The canonical token address that all collected tokens are swapped to (e.g., USDC)
     address public canonicalToken;
     
     /// @notice The Uniswap V3 SwapRouter address used for token swaps
-    address public router; 
-    
+    address public router;
+
+    /// @notice The Uniswap V3 Quoter address used to compute real-time quotes
+    address public quoter;
+
     /// @notice The authorized paymaster address that can trigger token swaps
     address public paymaster;
 
@@ -44,17 +53,28 @@ abstract contract StorageCollectorSwapper is ICollectorSwapper, AccessControl, P
      * @param _router The Uniswap V3 SwapRouter address for executing swaps
      * @param _admin The admin address that will receive DEFAULT_ADMIN_ROLE privileges
      */
-    constructor(address _paymaster, address _canonicalToken, address _router, address _admin) {
+    constructor(address _paymaster, address _canonicalToken, address _router, address _quoter, address _admin) {
         if (_paymaster == address(0)) revert ZeroAddress();
         if (_canonicalToken == address(0)) revert ZeroAddress();
         if (_router == address(0)) revert ZeroAddress();
+        if (_quoter == address(0)) revert ZeroAddress();
         if (_admin == address(0)) revert ZeroAddress();
 
         paymaster = _paymaster;
         canonicalToken = _canonicalToken;
         router = _router;
+        quoter = _quoter;
 
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
+    }
+
+    /// @inheritdoc ICollectorSwapper
+    /// @dev Only callable by admin. Used to set the slippage in basis points what is allowed for the swap.
+    ///      The slippage must be between 0 and 10_000.
+    function setSlippageBps(uint256 slippageBps_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (slippageBps_ == 0 || slippageBps_ > MAX_BIPS) revert InvalidSlippage();
+        slippageBps = slippageBps_;
+        emit SlippageUpdated(slippageBps_);
     }
 
     /// @inheritdoc ICollectorSwapper
@@ -85,6 +105,14 @@ abstract contract StorageCollectorSwapper is ICollectorSwapper, AccessControl, P
         if (router_ == address(0)) revert ZeroAddress();
         router = router_;
         emit RouterUpdated(router);
+    }
+
+    /// @inheritdoc ICollectorSwapper
+    /// @dev Only callable by admin. Quoter is used to compute on-chain quotes before swaps.
+    function setQuoter(address quoter_) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (quoter_ == address(0)) revert ZeroAddress();
+        quoter = quoter_;
+        emit QuoterUpdated(quoter);
     }
 
     /// @inheritdoc ICollectorSwapper

@@ -185,7 +185,7 @@ describe("CollectorSwapper", () => {
     it("swap should be performed successfully with overridden pool fee", async () => {
       const now = await getCurrentTimestamp();
       // override pool fee to 3000
-      const opaque = await getSwapOpaque(0n, now + DEFAULT_DEADLINE, 3000);
+      const opaque = await getSwapOpaque(now + DEFAULT_DEADLINE, 3000);
       const receipt = await handleOpsWithOpaque(opaque);
       
       expect(receipt?.status).to.equal(1);
@@ -220,7 +220,7 @@ describe("CollectorSwapper", () => {
 
     it("if swap fails, the token should be returned to the paymaster", async () => {
       const now = await getCurrentTimestamp();
-      const opaque = await getSwapOpaque(0n, now - 1); // deadline in the past
+      const opaque = await getSwapOpaque(now - 1); // deadline in the past
       const receipt = await handleOpsWithOpaque(opaque);
       
       expect(receipt?.status).to.equal(1);
@@ -407,7 +407,7 @@ describe("CollectorSwapper", () => {
 
     it("swap should be prevented if deadline is in the past. BUT NOT REVERT", async () => {
       const now = await getCurrentTimestamp();
-      const opaque = await getSwapOpaque(0n, now - 1);
+      const opaque = await getSwapOpaque(now - 1);
       const amountIn = parseUnits("1", 18);
       
       await weth.connect(binanceHotWallet).transfer(testPaymaster.address, amountIn);
@@ -445,10 +445,9 @@ describe("CollectorSwapper", () => {
       expect(errorMessage).to.equal("Transaction too old");
     });
 
-    it("swap should be prevented if amount out is not enough. BUT NOT REVERT", async () => {
-      // expect receive 10000 USDC for 1 WETH
-      const opaque = await getSwapOpaque(parseUnits("10000", 6));
-      const amountIn = parseUnits("1", 18);
+    it("swap should be prevented if amount out from quote is 0. BUT NOT REVERT", async () => {
+      const opaque = await getSwapOpaque();
+      const amountIn = 1n // to little to swap, possible swap is not possible, amount out will be 0
       
       await weth.connect(binanceHotWallet).transfer(testPaymaster.address, amountIn);
       await weth.connect(testPaymaster).approve(collectorSwapper.target.toString(), amountIn);
@@ -467,26 +466,17 @@ describe("CollectorSwapper", () => {
       const failedErrorData = (swapFailedEvent as EventLog).args[2];
 
       const actualErrorSelector = ethers.dataSlice(failedErrorData, 0, 4);
-      // in uni v3 router `require`, that means error is `Error(string)`
-      const expectedErrorSelector = ethers.id("Error(string)").slice(0, 10);
-
-      // decode the error message
-      const errorParams = ethers.AbiCoder.defaultAbiCoder().decode(
-        ["string"],
-        ethers.dataSlice(failedErrorData, 4)
-      );
-      const errorMessage = errorParams[0];
+      const expectedErrorSelector = ethers.id("InvalidAmountOut()").slice(0, 10);
 
       expect(failedTokenIn).to.equal(weth.target.toString());
       expect(failedAmountIn).to.equal(amountIn);
       expect(actualErrorSelector).to.equal(expectedErrorSelector);
-      expect(errorMessage).to.equal("Too little received");
     });
 
     it("swap should be prevented if specified pool fee tier is not supported. BUT NOT REVERT", async () => {
       const now = await getCurrentTimestamp();
       // 301315 is not supported pool fee tier
-      const opaque = await getSwapOpaque(0n, now + DEFAULT_DEADLINE, 301315);
+      const opaque = await getSwapOpaque(now + DEFAULT_DEADLINE, 301315);
       const amountIn = parseUnits("1", 18);
       
       await weth.connect(binanceHotWallet).transfer(testPaymaster.address, amountIn);
@@ -515,7 +505,7 @@ describe("CollectorSwapper", () => {
   });
 
   describe("Admin and storage functionality", () => {
-    it("only admin can set token config, pause, unpause, set canonical token, router and paymaster", async () => {
+    it("only admin can set token config, pause, unpause, set canonical token, router, slippage and paymaster", async () => {
       const ADMIN_ROLE = await collectorSwapper.DEFAULT_ADMIN_ROLE();
 
       await expect(
@@ -545,9 +535,17 @@ describe("CollectorSwapper", () => {
       await expect(collectorSwapper.connect(alice).setPaymaster(weth.target.toString()))
         .to.be.revertedWithCustomError(collectorSwapper, "AccessControlUnauthorizedAccount")
         .withArgs(alice.address, ADMIN_ROLE);
+
+      await expect(collectorSwapper.connect(alice).setQuoter(weth.target.toString()))
+        .to.be.revertedWithCustomError(collectorSwapper, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ADMIN_ROLE);
+
+      await expect(collectorSwapper.connect(alice).setSlippageBps(100))
+        .to.be.revertedWithCustomError(collectorSwapper, "AccessControlUnauthorizedAccount")
+        .withArgs(alice.address, ADMIN_ROLE);
     });
 
-    it("admin can set token config, pause, unpause, set canonical token, router and paymaster", async () => {
+    it("admin can set token config, pause, unpause, set canonical token, paymaster, router and quoter", async () => {
       const newToken = await ethers.deployContract("MockERC20", []);
       await collectorSwapper.connect(deployer).setTokenConfig(newToken.target.toString(), { enabled: true, poolFee: DEFAULT_POOL_FEE });
       const tokenConfig = await collectorSwapper.getTokenConfig(newToken.target.toString());
@@ -572,9 +570,17 @@ describe("CollectorSwapper", () => {
       await collectorSwapper.connect(deployer).setPaymaster(testPaymaster.address);
       const paymaster = await collectorSwapper.paymaster();
       expect(paymaster).to.equal(testPaymaster.address);
+
+      await collectorSwapper.connect(deployer).setQuoter(targetContract.target.toString());
+      const quoter = await collectorSwapper.quoter();
+      expect(quoter).to.equal(targetContract.target.toString());
+
+      await collectorSwapper.connect(deployer).setSlippageBps(100);
+      const slippage = await collectorSwapper.slippageBps();
+      expect(slippage).to.equal(100);
     });
 
-    it("should prevent setting invalid arguments for canonical token, router or paymaster or token config", async () => {
+    it("should prevent setting invalid arguments for canonical token, router, paymaster, quoter, slippage or token config", async () => {
       await expect(collectorSwapper.connect(deployer).setCanonicalToken(ZERO_ADDRESS))
         .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
 
@@ -584,22 +590,34 @@ describe("CollectorSwapper", () => {
       await expect(collectorSwapper.connect(deployer).setPaymaster(ZERO_ADDRESS))
         .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
 
+      await expect(collectorSwapper.connect(deployer).setQuoter(ZERO_ADDRESS))
+        .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
+
+      await expect(collectorSwapper.connect(deployer).setSlippageBps(0))
+        .to.be.revertedWithCustomError(collectorSwapper, "InvalidSlippage");
+
+      await expect(collectorSwapper.connect(deployer).setSlippageBps(10001))
+        .to.be.revertedWithCustomError(collectorSwapper, "InvalidSlippage");
+
       await expect(collectorSwapper.connect(deployer).setTokenConfig(ZERO_ADDRESS, { enabled: true, poolFee: DEFAULT_POOL_FEE }))
         .to.be.revertedWithCustomError(collectorSwapper, "InvalidTokenConfig");
 
       await expect(collectorSwapper.connect(deployer).setTokenConfig(weth.target.toString(), { enabled: true, poolFee: 0 }))
         .to.be.revertedWithCustomError(collectorSwapper, "InvalidTokenConfig");
 
-      await expect(ethers.deployContract("CollectorSwapper", [ZERO_ADDRESS, weth.target.toString(), targetContract.target.toString(), deployer.address]))
+      await expect(ethers.deployContract("CollectorSwapper", [ZERO_ADDRESS, weth.target.toString(), targetContract.target.toString(), targetContract.target.toString(), deployer.address]))
         .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
 
-      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), ZERO_ADDRESS, targetContract.target.toString(), deployer.address]))
+      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), ZERO_ADDRESS, targetContract.target.toString(), targetContract.target.toString(), deployer.address]))
         .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
 
-      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), targetContract.target.toString(), ZERO_ADDRESS, deployer.address]))
+      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), targetContract.target.toString(), ZERO_ADDRESS, targetContract.target.toString(), deployer.address]))
         .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
 
-      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), targetContract.target.toString(), targetContract.target.toString(), ZERO_ADDRESS]))
+      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), targetContract.target.toString(), targetContract.target.toString(), ZERO_ADDRESS, deployer.address]))
+        .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
+
+      await expect(ethers.deployContract("CollectorSwapper", [weth.target.toString(), targetContract.target.toString(), targetContract.target.toString(), targetContract.target.toString(), ZERO_ADDRESS]))
         .to.be.revertedWithCustomError(collectorSwapper, "ZeroAddress");
     });
   });

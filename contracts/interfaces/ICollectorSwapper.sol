@@ -18,6 +18,12 @@ interface ICollectorSwapper {
     }
 
     /**
+     * @notice Emitted when the slippage is updated
+     * @param slippage The new slippage in basis points
+     */
+    event SlippageUpdated(uint256 slippage);
+
+    /**
      * @notice Emitted when the Uniswap V3 router address is updated
      * @param router The new router address
      */
@@ -44,6 +50,12 @@ interface ICollectorSwapper {
     event TokenConfigUpdated(address indexed token, bool enabled, uint24 poolFee);
 
     /**
+     * @notice Emitted when the Uniswap V3 Quoter address is updated
+     * @param quoter The new quoter address
+     */
+    event QuoterUpdated(address indexed quoter);
+
+    /**
      * @notice Emitted when a token swap completes successfully
      * @param tokenIn The input token that was swapped
      * @param amountIn The amount of input token swapped
@@ -61,11 +73,17 @@ interface ICollectorSwapper {
 
     /**
      * @notice Handles post-operation token swap from fee token to canonical token
-     * @param opaque Encoded swap parameters (amountOutMin, deadline, poolFee override)
+     * @param opaque Encoded swap parameters (deadline, poolFee override)
      * @param tokenIn The token address to swap from
      * @param amountIn The amount of tokens to swap
      */
     function postOpHandle(bytes calldata opaque, address tokenIn, uint256 amountIn) external;
+
+    /**
+     * @notice Updates the slippage in basis points what is allowed for the swap
+     * @param slippageBps_ The new slippage in basis points to set
+     */
+    function setSlippageBps(uint256 slippageBps_) external;
 
     /**
      * @notice Configures a token for swapping by setting its enabled status and pool fee
@@ -85,6 +103,12 @@ interface ICollectorSwapper {
      * @param router_ The new Uniswap V3 SwapRouter address to set
      */
     function setRouter(address router_) external;
+
+    /**
+     * @notice Updates the Uniswap V3 Quoter address used for real-time quotes
+     * @param quoter_ The new Uniswap V3 Quoter address to set
+     */
+    function setQuoter(address quoter_) external;
 
     /**
      * @notice Updates the authorized paymaster address that can trigger token swaps

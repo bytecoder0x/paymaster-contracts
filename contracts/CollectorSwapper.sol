@@ -6,29 +6,33 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ISwapRouter} from "@uniswap/v3-periphery/contracts/interfaces/ISwapRouter.sol";
+import {IQuoterV2} from "@uniswap/v3-periphery/contracts/interfaces/IQuoterV2.sol";
 
 import {ApproveManager} from "./components/ApproveManager.sol";
 import {StorageCollectorSwapper} from "./components/StorageCollectorSwapper.sol";
 import {ICollectorSwapper} from "./interfaces/ICollectorSwapper.sol";
 import {ZeroAddress} from "./errors/PaymasterErrors.sol";
-import {Unauthorized, TokenIsCanonical, UnsupportedToken, InvalidOpaqueLength} from "./errors/CollectorSwapperErrors.sol";
+import {Unauthorized, TokenIsCanonical, UnsupportedToken, InvalidOpaqueLength, InvalidAmountOut} from "./errors/CollectorSwapperErrors.sol";
 
 contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
     using SafeERC20 for IERC20;
 
-    uint256 private constant OPAQUE_LENGTH = 96;
+    uint256 private constant OPAQUE_LENGTH = 64;
 
     /**
+     * @param paymaster_ The paymaster address
      * @param canonicalToken_ The canonical token address (e.g., USDC)
      * @param router_ Uniswap V3 SwapRouter address
+     * @param quoter_ Uniswap V3 Quoter address
      * @param admin_ Admin address for DEFAULT_ADMIN_ROLE
      */
     constructor(
         address paymaster_,
         address canonicalToken_,
         address router_,
+        address quoter_,
         address admin_
-    ) StorageCollectorSwapper(paymaster_, canonicalToken_, router_, admin_) { }
+    ) StorageCollectorSwapper(paymaster_, canonicalToken_, router_, quoter_, admin_) { }
 
     /// @inheritdoc ICollectorSwapper
     /// @dev Performs validation checks before executing swap via Uniswap V3 router.
@@ -40,7 +44,12 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         if (!_validatePostOpHandle(opaque, tokenIn, amountIn)) return;
 
         // Parse the opaque payload
-        (uint256 amountOutMin, uint256 deadline, uint24 poolFee) = _parseOpaque(opaque, tokenIn);
+        (uint256 deadline, uint24 poolFee) = _parseOpaque(opaque, tokenIn);
+
+        // Get the minimum amount out what we expect to receive
+        uint256 amountOutMin = getAmountOutMin(tokenIn, amountIn, poolFee);
+        // If the amount out min is 0 that means the swap is not possible, so we return
+        if (amountOutMin == 0) return;
 
         // receive the token from the paymaster
         IERC20(tokenIn).safeTransferFrom(paymaster, address(this), amountIn);
@@ -92,6 +101,28 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         isValid = true;
     }
 
+    function getAmountOutMin(address tokenIn, uint256 amountIn, uint24 poolFee) public returns (uint256 amountOutMin) {
+        IQuoterV2.QuoteExactInputSingleParams memory params = IQuoterV2.QuoteExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: canonicalToken,
+            amountIn: amountIn,
+            fee: poolFee,
+            sqrtPriceLimitX96: 0
+        });
+
+        try IQuoterV2(quoter).quoteExactInputSingle(params)
+            returns (uint256 amountOut, uint160, uint32, uint256)
+        {
+            if (amountOut != 0) {
+                amountOutMin = amountOut * (MAX_BIPS - slippageBps) / MAX_BIPS;
+            } else {
+                emit SwapFailed(tokenIn, amountIn, abi.encodeWithSelector(InvalidAmountOut.selector));
+            }
+        } catch (bytes memory reason) {
+            emit SwapFailed(tokenIn, amountIn, reason);
+        }
+    }
+
     function _parseOpaque(
         bytes calldata opaque,
         address tokenIn
@@ -99,7 +130,6 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         private
         view
         returns (
-            uint256 amountOutMin,
             uint256 deadline,
             uint24 poolFee
         )
@@ -109,10 +139,6 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         uint256 offset = 0;
 
         assembly {
-            // amountOutMin (32 bytes)
-            amountOutMin := calldataload(add(opaque.offset, offset))
-            offset := add(offset, 32)
-
             // deadline (32 bytes)
             deadline := calldataload(add(opaque.offset, offset))
             offset := add(offset, 32)

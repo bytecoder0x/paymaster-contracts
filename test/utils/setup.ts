@@ -8,6 +8,7 @@ import {
   WETH_TOKEN,
   UNISWAP_V3_ROUTER,
   DEFAULT_POOL_FEE,
+  UNISWAP_V3_QUOTER,
 } from "../constants";
 import {
   IEntryPoint__factory,
@@ -49,6 +50,7 @@ export const setup = async () => {
     paymaster.target.toString(),
     USDC_TOKEN,
     UNISWAP_V3_ROUTER,
+    UNISWAP_V3_QUOTER,
     deployer.address,
   ]);
 
