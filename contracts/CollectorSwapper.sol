@@ -68,6 +68,28 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         }
     }
 
+    function getAmountOutMin(address tokenIn, uint256 amountIn, uint24 poolFee) public returns (uint256 amountOutMin) {
+        IQuoterV2.QuoteExactInputSingleParams memory params = IQuoterV2.QuoteExactInputSingleParams({
+            tokenIn: tokenIn,
+            tokenOut: canonicalToken,
+            amountIn: amountIn,
+            fee: poolFee,
+            sqrtPriceLimitX96: 0
+        });
+
+        try IQuoterV2(quoter).quoteExactInputSingle(params)
+            returns (uint256 amountOut, uint160, uint32, uint256)
+        {
+            if (amountOut != 0) {
+                amountOutMin = amountOut * (MAX_BIPS - slippageBps) / MAX_BIPS;
+            } else {
+                emit SwapFailed(tokenIn, amountIn, abi.encodeWithSelector(InvalidAmountOut.selector));
+            }
+        } catch (bytes memory reason) {
+            emit SwapFailed(tokenIn, amountIn, reason);
+        }
+    }
+
     function _validatePostOpHandle(
         bytes calldata opaque,
         address tokenIn,
@@ -99,28 +121,6 @@ contract CollectorSwapper is StorageCollectorSwapper, ApproveManager {
         }
 
         isValid = true;
-    }
-
-    function getAmountOutMin(address tokenIn, uint256 amountIn, uint24 poolFee) public returns (uint256 amountOutMin) {
-        IQuoterV2.QuoteExactInputSingleParams memory params = IQuoterV2.QuoteExactInputSingleParams({
-            tokenIn: tokenIn,
-            tokenOut: canonicalToken,
-            amountIn: amountIn,
-            fee: poolFee,
-            sqrtPriceLimitX96: 0
-        });
-
-        try IQuoterV2(quoter).quoteExactInputSingle(params)
-            returns (uint256 amountOut, uint160, uint32, uint256)
-        {
-            if (amountOut != 0) {
-                amountOutMin = amountOut * (MAX_BIPS - slippageBps) / MAX_BIPS;
-            } else {
-                emit SwapFailed(tokenIn, amountIn, abi.encodeWithSelector(InvalidAmountOut.selector));
-            }
-        } catch (bytes memory reason) {
-            emit SwapFailed(tokenIn, amountIn, reason);
-        }
     }
 
     function _parseOpaque(
