@@ -38,7 +38,6 @@ abstract contract EIP712Service is ValidationModifiers, AccessControlEnumerable,
     )
         internal
         nonZeroAddress(param.token)
-        nonZeroUint256(param.exchangeRate)
         nonZeroUint256(param.postOpCost)
         returns (uint256 validationData)
     {

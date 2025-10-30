@@ -399,6 +399,59 @@ describe("TokenPaymaster", () => {
       expect(transferEvents[0].args[2]).to.be.greaterThan(0); // Transfer amount should be positive
     });
 
+    it("should allow sponsored user operations with no tokens needed", async () => {
+      await approveToPaymaster(sender, userSigner, paymaster, usdc, deployer);
+
+      const exchangeRate = BigInt(0); // no tokens needed
+      const callData = targetContract.interface.encodeFunctionData("count");
+      const paymentStruct = {
+        token: usdc,
+        exchangeRate,
+        postOpCost: GAS.PAYMASTER_POST_OP,
+        operator,
+      };
+      // Create the full userOp callData that will be used in the actual transaction
+      const userOpCallData = sender.interface.encodeFunctionData("execute", [
+        targetContract.target.toString(),
+        0n,
+        callData,
+      ]);
+      const paymentSignature = await getPaymentSignature(
+        paymaster,
+        paymentStruct,
+        userOpCallData,
+        sender.target.toString(),
+      );
+      const userOp = await getUserOp(
+        entryPointV8,
+        paymaster,
+        userSigner,
+        sender,
+        targetContract.target.toString(),
+        0n,
+        callData,
+        { ...paymentStruct, ...paymentSignature },
+      );
+
+      const userOpHash = await entryPointV8.getUserOpHash(userOp);
+      const txPromise = entryPointV8.handleOps([userOp], beneficiary);
+      const tx = await txPromise;
+      const receipt = await tx.wait();
+
+      const sponsoredEvents = await paymaster.queryFilter(
+        paymaster.filters.UserOperationSponsored(),
+        receipt?.blockNumber,
+        receipt?.blockNumber,
+      );
+      expect(sponsoredEvents.length).to.equal(1);
+      const event = sponsoredEvents[0];
+      expect(event.args[0]).to.equal(sender.target.toString());
+      expect(event.args[1]).to.equal(userOpHash);
+      expect(event.args[2]).to.equal(usdc.target.toString());
+      expect(event.args[3]).to.equal(0n); // no tokens needed
+      expect(event.args[4]).to.equal(exchangeRate);
+    });
+
     it("should emit postOp revert event if insufficient allowance", async () => {
       const exchangeRate = BigInt(2500 * 1e6);
       const callData = targetContract.interface.encodeFunctionData("count");
@@ -1049,42 +1102,6 @@ describe("TokenPaymaster", () => {
       await expect(entryPointV8.handleOps([userOp], beneficiary))
         .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
         .withArgs(0, "AA33 reverted", paymaster.interface.encodeErrorResult("ZeroAddress", []));
-    });
-
-    it("should fail with zero token price", async () => {
-      const callData = targetContract.interface.encodeFunctionData("count");
-      const paymentStruct = {
-        token: usdc,
-        exchangeRate: 0n, // Zero price
-        postOpCost: GAS.PAYMASTER_POST_OP,
-        operator,
-      };
-      const userOpCallData = sender.interface.encodeFunctionData("execute", [
-        targetContract.target.toString(),
-        0n,
-        callData,
-      ]);
-      const paymentSignature = await getPaymentSignature(
-        paymaster,
-        paymentStruct,
-        userOpCallData,
-        sender.target.toString(),
-      );
-
-      const userOp = await getUserOp(
-        entryPointV8,
-        paymaster,
-        userSigner,
-        sender,
-        targetContract.target.toString(),
-        0n,
-        callData,
-        { ...paymentStruct, ...paymentSignature },
-      );
-
-      await expect(entryPointV8.handleOps([userOp], beneficiary))
-        .to.be.revertedWithCustomError(entryPointV8, "FailedOpWithRevert")
-        .withArgs(0, "AA33 reverted", paymaster.interface.encodeErrorResult("ZeroUint256", []));
     });
 
     it("should fail with zero postOp cost", async () => {

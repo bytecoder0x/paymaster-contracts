@@ -105,12 +105,14 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
             actualTokenNeeded = (numerator + TOKEN_PRICE_DENOMINATOR - 1) / TOKEN_PRICE_DENOMINATOR;
         }
 
+        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
+
+        // If no tokens needed, return early (for sponsored user operations)
+        if (actualTokenNeeded == 0) return;
+
         // Cache storage read for gas optimization and cleaner code
         ICollectorSwapper swapper = collectorSwapper;
         bool shouldSwap = postOpSwapEnabled && address(swapper) != address(0) && swapper.isSwapAvailable(token, opaque);
-
-        // Emit event BEFORE external calls (CEI pattern)
-        emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);
 
         // Transfer exact token amount from user to paymaster
         // User must have sufficient allowance or include approve in userOp calldata
