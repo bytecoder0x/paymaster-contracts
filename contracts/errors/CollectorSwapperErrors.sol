@@ -29,11 +29,6 @@ error TokenIsCanonical();
 error UnsupportedToken(address token);
 
 /**
- * @notice Reverts if the token configuration is invalid for swap.
- */
-error InvalidTokenConfig();
-
-/**
  * @notice Reverts if the slippage to set is invalid. Must be between 0 and 10000.
  */
 error InvalidSlippage();
@@ -42,3 +37,9 @@ error InvalidSlippage();
  * @notice Reverts if the amount out from quote is 0.
  */
 error InvalidAmountOut();
+
+/**
+ * @notice Reverts if the swap is not possible for the given token.
+ * @param tokenIn The address of the token that is not supported for swapping.
+ */
+error SwapIsNotPossible(address tokenIn);

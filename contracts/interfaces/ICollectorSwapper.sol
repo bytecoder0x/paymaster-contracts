@@ -8,16 +8,6 @@ pragma solidity 0.8.28;
 interface ICollectorSwapper {
 
     /**
-     * @notice Configuration for a token that can be swapped
-     * @param enabled Whether the token is enabled for swapping
-     * @param poolFee The Uniswap V3 pool fee tier in basis points (e.g., 500, 3000, 10000)
-     */
-    struct TokenConfig {
-        bool enabled;
-        uint24 poolFee; 
-    }
-
-    /**
      * @notice Emitted when the slippage is updated
      * @param slippage The new slippage in basis points
      */
@@ -42,18 +32,16 @@ interface ICollectorSwapper {
     event PaymasterUpdated(address indexed paymaster);
     
     /**
-     * @notice Emitted when a token's swap configuration is updated
-     * @param token The token address being configured
-     * @param enabled Whether the token is enabled for swapping
-     * @param poolFee The Uniswap V3 pool fee for this token
-     */
-    event TokenConfigUpdated(address indexed token, bool enabled, uint24 poolFee);
-
-    /**
      * @notice Emitted when the Uniswap V3 Quoter address is updated
      * @param quoter The new quoter address
      */
     event QuoterUpdated(address indexed quoter);
+
+    /**
+     * @notice Emitted when the Uniswap V3 Factory address is updated
+     * @param factory The new factory address
+     */
+    event FactoryUpdated(address indexed factory);
 
     /**
      * @notice Emitted when a token swap completes successfully
@@ -80,23 +68,31 @@ interface ICollectorSwapper {
     function postOpHandle(bytes calldata opaque, address tokenIn, uint256 amountIn) external;
 
     /**
+     * @notice Gets the minimum amount out for a swap
+     * @param tokenIn The token to swap from
+     * @param amountIn The amount of tokens to swap
+     * @param poolFee The Uniswap V3 pool fee tier
+     * @return amountOutMin The minimum amount out for the swap
+     */
+    function getAmountOutMin(address tokenIn, uint256 amountIn, uint24 poolFee) external returns (uint256 amountOutMin);
+
+    /**
      * @notice Updates the slippage in basis points what is allowed for the swap
      * @param slippageBps_ The new slippage in basis points to set
      */
     function setSlippageBps(uint256 slippageBps_) external;
 
     /**
-     * @notice Configures a token for swapping by setting its enabled status and pool fee
-     * @param token The ERC20 token address to configure
-     * @param cfg The token configuration containing enabled flag and pool fee in basis points
-     */
-    function setTokenConfig(address token, TokenConfig calldata cfg) external;
-
-    /**
      * @notice Updates the canonical token address that all collected tokens will be swapped to
      * @param canonicalToken_ The new canonical token address to set
      */
     function setCanonicalToken(address canonicalToken_) external;
+
+    /**
+     * @notice Updates the Uniswap V3 Factory address used to search for pools
+     * @param factory_ The new Uniswap V3 Factory address to set
+     */
+    function setFactory(address factory_) external;
 
     /**
      * @notice Updates the Uniswap V3 SwapRouter address used for executing token swaps
@@ -127,16 +123,18 @@ interface ICollectorSwapper {
     function unpause() external;
 
     /**
-     * @notice Retrieves the complete swap configuration for a specific token
-     * @param token The ERC20 token address to query
-     * @return The token configuration struct with enabled flag and pool fee
+     * @notice Checks whether a swap pool exists for the given token pair and pool fee
+     * @param tokenIn The token to swap from
+     * @param poolFee The Uniswap V3 pool fee tier
+     * @return True if the swap pool exists, false otherwise
      */
-    function getTokenConfig(address token) external view returns (TokenConfig memory);
+    function isSwapAvailable(address tokenIn, uint24 poolFee) external view returns (bool);
 
     /**
-     * @notice Checks if a token is enabled for swapping
-     * @param token The token address to check
-     * @return enabled True if the token can be swapped, false otherwise
+     * @notice Checks whether a swap pool exists by decoding the provided opaque payload
+     * @param tokenIn The token to swap from
+     * @param opaque Encoded swap parameters containing the pool fee
+     * @return True if the swap pool exists, false otherwise
      */
-    function isTokenEnabled(address token) external view returns (bool enabled);
+    function isSwapAvailable(address tokenIn, bytes calldata opaque) external view returns (bool);
 }

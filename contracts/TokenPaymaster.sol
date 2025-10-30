@@ -107,7 +107,7 @@ contract TokenPaymaster is ITokenPaymaster, ValidationModifiers, StakeManager, E
 
         // Cache storage read for gas optimization and cleaner code
         ICollectorSwapper swapper = collectorSwapper;
-        bool shouldSwap = postOpSwapEnabled && address(swapper) != address(0) && swapper.isTokenEnabled(token);
+        bool shouldSwap = postOpSwapEnabled && address(swapper) != address(0) && swapper.isSwapAvailable(token, opaque);
 
         // Emit event BEFORE external calls (CEI pattern)
         emit UserOperationSponsored(sender, userOpHash, token, actualTokenNeeded, exchangeRate);

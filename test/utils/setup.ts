@@ -6,8 +6,8 @@ import {
   ENTRY_POINT_V07,
   USDC_TOKEN,
   WETH_TOKEN,
+  UNISWAP_V3_FACTORY,
   UNISWAP_V3_ROUTER,
-  DEFAULT_POOL_FEE,
   UNISWAP_V3_QUOTER,
 } from "../constants";
 import {
@@ -49,6 +49,7 @@ export const setup = async () => {
   const collectorSwapper = await ethers.deployContract("CollectorSwapper", [
     paymaster.target.toString(),
     USDC_TOKEN,
+    UNISWAP_V3_FACTORY,
     UNISWAP_V3_ROUTER,
     UNISWAP_V3_QUOTER,
     deployer.address,
@@ -57,10 +58,6 @@ export const setup = async () => {
   await paymaster.setCollectorSwapper(collectorSwapper.target.toString());
   await collectorSwapper.setPaymaster(paymaster.target.toString());
   await paymaster.setPostOpSwapEnabled(true);
-  await collectorSwapper.setTokenConfig(WETH_TOKEN, {
-    enabled: true,
-    poolFee: DEFAULT_POOL_FEE,
-  });
 
   await usdc.connect(binanceHotWallet).transfer(sender, parseUnits("1000", 6));
   await weth.connect(binanceHotWallet).transfer(sender, parseUnits("10", 18));
